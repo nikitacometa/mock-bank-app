@@ -78,6 +78,44 @@
     text-transform: uppercase;
     color: var(--color-ink-3);
   }
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+  @keyframes draw-stroke {
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+  @keyframes rise-in {
+    from {
+      transform: translateY(26px);
+      opacity: 0.4;
+    }
+    to {
+      transform: none;
+      opacity: 1;
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  .sheet-panel {
+    animation: rise-in 270ms var(--ease-out-premium);
+  }
+  .sheet-overlay {
+    animation: fade-in 200ms ease-out;
+  }
+  .toast-enter {
+    animation: rise-in 220ms var(--ease-out-premium);
+  }
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
