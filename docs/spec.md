@@ -313,6 +313,6 @@ M6, не размазана.
   bindCssVars-угроза, env() мимо линта, репо/домен в гейте бренда, конфликт жестов tilt.
 - **User-lens:** реквизиты в модели, поиск в History, видимый APY, связь ног перевода,
   success-сцена, сортировка контактов, реалистичное время сида.
-- Артефакты рана: `mission-brief.md`, `context-packet.md`, `research/*.md`, `digest.md`,
-  `claude-v1/v2.md`, `codex-v1/v2.md`, `redteam.md`, `lens-user.md`, `lens-completeness.md`
-  (scratchpad сессии 2026-09-01).
+- Ключевые артефакты рана скопированы в `docs/research/` (digest, redteam, lens-user,
+  lens-completeness, context-packet, оба v2-плана, mission-brief); сырые v1 и research/*
+  остались в scratchpad сессии 2026-09-01 и умрут вместе с ней.
