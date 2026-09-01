@@ -1,0 +1,89 @@
+@import 'tailwindcss';
+
+/*
+ * Cometa design tokens — single semantic set (docs/spec.md §5.4).
+ * Dark-only in phase 1; phase 2 rebinds NEUTRALS to Telegram themeParams,
+ * brand accents (--color-ivory, --color-mint) are never auto-bound.
+ */
+@theme {
+  --color-*: initial;
+
+  /* neutrals — cold near-black, blue undertone */
+  --color-bg: oklch(0.125 0.012 252);
+  --color-surface: oklch(0.165 0.014 252);
+  --color-surface-2: oklch(0.205 0.016 252);
+  --color-line: oklch(0.26 0.015 252);
+  --color-ink: oklch(0.93 0.006 252);
+  --color-ink-2: oklch(0.72 0.012 252);
+  --color-ink-3: oklch(0.54 0.014 252);
+
+  /* brand — warm ivory against the cold base; mint strictly = growth/success */
+  --color-ivory: oklch(0.945 0.022 84);
+  --color-ivory-press: oklch(0.885 0.024 84);
+  --color-mint: oklch(0.84 0.083 163);
+  --color-mint-dim: oklch(0.84 0.083 163 / 12%);
+  --color-coral: oklch(0.71 0.105 27);
+
+  --font-sans: 'Geist', 'Onest', system-ui, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, monospace;
+
+  --radius-card: 1.25rem;
+  --radius-sheet: 1.75rem;
+  --radius-btn: 0.875rem;
+
+  --ease-out-premium: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/*
+ * Platform-owned viewport vars. The ONLY place raw env()/dvh may appear
+ * (enforced by scripts/check-css-guards.sh). Phase 2: platform/viewport
+ * re-points --app-height at Telegram viewportStableHeight.
+ */
+:root {
+  --app-height: 100dvh;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@layer base {
+  html {
+    background: var(--color-bg);
+    color-scheme: dark;
+  }
+  body {
+    margin: 0;
+    background: var(--color-bg);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+  }
+  button {
+    font: inherit;
+    color: inherit;
+  }
+  /* money and card numbers: guaranteed equal-width digits */
+  .num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+  .kicker {
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--color-ink-3);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
