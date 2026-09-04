@@ -483,11 +483,47 @@ rg --quiet 'certbot/certbot:v[0-9.]+@sha256:[a-f0-9]{64}' \
   "${project_root}/deploy/standalone/compose.yaml" || \
   fail 'Certbot image must use a digest pin'
 
+standalone_compose="${project_root}/deploy/standalone/compose.yaml"
+node --input-type=module --eval '
+  import { readFileSync } from "node:fs";
+  const composePath = process.argv[1];
+  const lines = readFileSync(composePath, "utf8").split(/\r?\n/);
+  const fail = (message) => { throw new Error(message); };
+  let bindMountCount = 0;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const item = lines[index].match(/^(\s*)- type:\s*bind\s*$/);
+    if (!item) continue;
+    bindMountCount += 1;
+    const itemIndent = item[1].length;
+    const block = [];
+    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+      const line = lines[cursor];
+      if (line.trim() === "" || line.trimStart().startsWith("#")) {
+        block.push(line);
+        continue;
+      }
+      const indent = line.match(/^\s*/)?.[0].length ?? 0;
+      if (indent <= itemIndent) break;
+      block.push(line);
+    }
+    const safeSetting = `${" ".repeat(itemIndent + 4)}create_host_path: false`;
+    if (!block.includes(safeSetting)) {
+      const source = block.find((line) => line.trimStart().startsWith("source:"))?.trim();
+      fail(`bind mount must set create_host_path: false: ${source ?? `item ${bindMountCount}`}`);
+    }
+  }
+
+  if (bindMountCount !== 3) {
+    fail(`standalone Compose bind mount count changed: expected 3, got ${bindMountCount}`);
+  }
+' "${standalone_compose}"
+
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
   rendered_compose="$(COMETA_RELEASE_ID='20990101T000000Z' \
     COMETA_DEPLOY_ROOT='/srv/cometa-bank' \
     docker compose \
-      -f "${project_root}/deploy/standalone/compose.yaml" \
+      -f "${standalone_compose}" \
       config --format json)"
   node --input-type=module --eval '
     import { readFileSync } from "node:fs";
@@ -513,8 +549,8 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
       if (!service.cap_drop?.includes("ALL")) fail(`${serviceName} must drop all capabilities`);
     }
     for (const volume of config.services.bot.volumes ?? []) {
-      if (volume.type === "bind" && volume.bind?.create_host_path !== false) {
-        fail(`bot bind mount may auto-create ${volume.source}`);
+      if (volume.type === "bind" && volume.bind?.create_host_path === true) {
+        fail(`rendered bot bind mount enables host-path creation: ${volume.source}`);
       }
     }
   ' <<<"${rendered_compose}"
