@@ -1,7 +1,9 @@
 import { Component, type ReactNode } from 'react';
+import { translate, type AppLocale } from '@/i18n';
 
 interface Props {
-  onReset(): void;
+  locale: AppLocale;
+  onReset(): void | Promise<void>;
   children: ReactNode;
 }
 
@@ -28,17 +30,24 @@ export class ErrorBoundary extends Component<Props, { failed: boolean }> {
         style={{ minHeight: 'var(--app-height)' }}
       >
         <div className="kicker">Cometa</div>
-        <p className="max-w-64 text-ink-2">
-          Что-то сломалось. Данные — демо, так что проще всего начать заново.
+        <p role="alert" className="max-w-64 text-ink-2">
+          {translate(this.props.locale, 'error.crash')}
         </p>
         <button
+          autoFocus
           className="rounded-btn bg-ivory px-6 py-3 font-medium text-bg active:bg-ivory-press"
           onClick={() => {
-            this.props.onReset();
-            this.setState({ failed: false });
+            void Promise.resolve()
+              .then(() => this.props.onReset())
+              .then(() => {
+                this.setState({ failed: false });
+              })
+              .catch((error: unknown) => {
+                console.error('[cometa] demo reset failed', error);
+              });
           }}
         >
-          Перезапустить демо
+          {translate(this.props.locale, 'error.restart')}
         </button>
       </div>
     );

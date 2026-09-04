@@ -3,3 +3,11 @@ dist/
 *.local
 .DS_Store
 .wrangler/
+.playwright-cli/
+output/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+*.pem
+*.key

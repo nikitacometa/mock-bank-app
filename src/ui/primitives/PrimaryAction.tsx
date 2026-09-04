@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { usePlatform } from '@/platform/usePlatform';
 
 /**
@@ -17,12 +17,22 @@ export function PrimaryAction({
 }) {
   const platform = usePlatform();
   const { supported, show, hide } = platform.mainButton;
+  const onClickRef = useRef(onClick);
+  const forwardNativeClick = useCallback(() => onClickRef.current(), []);
+
+  useEffect(() => {
+    onClickRef.current = onClick;
+  }, [onClick]);
 
   useEffect(() => {
     if (!supported) return;
-    show({ text, onClick, disabled });
+    show({ text, onClick: forwardNativeClick, disabled });
+  }, [supported, show, text, disabled, forwardNativeClick]);
+
+  useEffect(() => {
+    if (!supported) return;
     return () => hide();
-  }, [supported, show, hide, text, onClick, disabled]);
+  }, [supported, hide]);
 
   if (supported) return null;
   return (

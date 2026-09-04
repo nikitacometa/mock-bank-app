@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "noEmitOnError": true,
+    "rootDir": "bot",
+    "outDir": "bot/dist",
+    "sourceMap": true,
+    "types": ["node"]
+  },
+  "include": ["bot/**/*.ts"],
+  "exclude": ["bot/dist", "bot/**/*.test.ts", "bot/vitest.config.ts"]
+}

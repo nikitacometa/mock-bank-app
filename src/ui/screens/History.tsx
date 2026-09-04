@@ -1,18 +1,22 @@
-import { useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useBankStore } from '@/store/bankStore';
 import { useUiStore } from '@/store/uiStore';
 import type { Transaction } from '@/domain/types';
-import { CATEGORY_LABELS, dayKey, fmtDay } from '../format';
+import { useI18n, type TranslationKey } from '@/i18n';
+import { categoryLabel, dayKey, fmtDay, localizeDemoText } from '../format';
 import { TxRow } from '../TxRow';
+import { AccountStrip } from '../AccountStrip';
 import { IconSearch } from '../icons';
 
 type Filter = 'all' | 'expense' | 'income';
 
-const FILTERS: Array<{ id: Filter; label: string }> = [
-  { id: 'all', label: 'Все' },
-  { id: 'expense', label: 'Расходы' },
-  { id: 'income', label: 'Поступления' },
+const FILTERS: Array<{ id: Filter; labelKey: TranslationKey }> = [
+  { id: 'all', labelKey: 'history.filter.all' },
+  { id: 'expense', labelKey: 'history.filter.expense' },
+  { id: 'income', labelKey: 'history.filter.income' },
 ];
+const INITIAL_VISIBLE_GROUPS = 24;
+const GROUPS_PER_PAGE = 16;
 
 export function History() {
   const accounts = useBankStore((s) => s.accounts);
@@ -21,20 +25,29 @@ export function History() {
   const setActiveAccount = useUiStore((s) => s.setActiveAccount);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
+  const [visibleGroupCount, setVisibleGroupCount] = useState(INITIAL_VISIBLE_GROUPS);
+  const [announcedVisibleCount, setAnnouncedVisibleCount] = useState(0);
+  const [focusGroupIndex, setFocusGroupIndex] = useState<number | null>(null);
+  const nextGroupHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const deferredQuery = useDeferredValue(query);
+  const { locale, t } = useI18n();
+  const activeAccount = accounts.find((account) => account.id === activeAccountId) ?? accounts[0];
 
   const groups = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = deferredQuery.trim().toLowerCase();
     const rows = transactions
-      .filter((t) => t.accountId === activeAccountId)
+      .filter((t) => t.accountId === activeAccount.id)
       .filter((t) => (filter === 'expense' ? t.amountMinor < 0 : filter === 'income' ? t.amountMinor > 0 : true))
       .filter((t) => {
         if (!q) return true;
-        const label = CATEGORY_LABELS[t.category ?? 'other'] ?? '';
+        const label = categoryLabel(t.category, locale);
+        const counterparty = localizeDemoText(t.counterparty, locale);
         return (
-          (t.counterparty ?? '').toLowerCase().includes(q) || label.toLowerCase().includes(q)
+          counterparty.toLocaleLowerCase(locale).includes(q) ||
+          label.toLocaleLowerCase(locale).includes(q)
         );
       })
-      .reverse();
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.seq - a.seq);
     const byDay = new Map<string, Transaction[]>();
     for (const t of rows) {
       const key = dayKey(t.createdAt);
@@ -43,35 +56,60 @@ export function History() {
       else byDay.set(key, [t]);
     }
     return [...byDay.entries()];
-  }, [transactions, activeAccountId, query, filter]);
+  }, [transactions, activeAccount.id, deferredQuery, filter, locale]);
+  const visibleGroups = groups.slice(0, visibleGroupCount);
+
+  useEffect(() => {
+    if (focusGroupIndex === null) return;
+    nextGroupHeadingRef.current?.focus();
+  }, [focusGroupIndex, visibleGroupCount]);
+
+  const resetWindow = () => {
+    setFocusGroupIndex(null);
+    setAnnouncedVisibleCount(0);
+    setVisibleGroupCount(INITIAL_VISIBLE_GROUPS);
+  };
+
+  const selectAccount = (accountId: string) => {
+    resetWindow();
+    setActiveAccount(accountId);
+  };
+
+  const revealMore = () => {
+    const firstNewIndex = visibleGroups.length;
+    const nextVisibleCount = Math.min(groups.length, firstNewIndex + GROUPS_PER_PAGE);
+    setFocusGroupIndex(firstNewIndex);
+    setAnnouncedVisibleCount(nextVisibleCount);
+    setVisibleGroupCount(nextVisibleCount);
+  };
 
   return (
     <div className="px-4 pb-28" style={{ paddingTop: 'calc(var(--safe-top) + 0.75rem)' }}>
       <header className="px-1 py-2.5">
-        <h1 className="text-[1.375rem] font-semibold tracking-tight">История</h1>
+        <h1 className="text-[1.375rem] font-semibold tracking-tight">{t('history.title')}</h1>
       </header>
 
-      <div className="flex gap-1.5 px-1">
-        {accounts.map((a) => (
-          <button
-            key={a.id}
-            className={`rounded-full px-3.5 py-1.5 text-[0.8125rem] transition-colors ${
-              a.id === activeAccountId ? 'bg-ink font-medium text-bg' : 'bg-surface text-ink-2'
-            }`}
-            onClick={() => setActiveAccount(a.id)}
-          >
-            {a.name}
-          </button>
-        ))}
+      <div className="scrollbar-none -mx-4 overflow-x-auto px-4">
+        <AccountStrip
+          accounts={accounts}
+          value={activeAccount.id}
+          onChange={selectAccount}
+          label={t('history.accountPicker')}
+          compact
+        />
       </div>
 
       <label className="mt-3 flex items-center gap-2.5 rounded-btn bg-surface px-3.5 py-2.5 focus-within:ring-1 focus-within:ring-ink-3">
         <IconSearch size={18} className="shrink-0 text-ink-3" />
         <input
           className="w-full bg-transparent text-[0.9375rem] outline-none placeholder:text-ink-3"
-          placeholder="Мерчант или категория"
+          placeholder={t('history.searchPlaceholder')}
+          aria-label={t('history.searchLabel')}
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            resetWindow();
+            setQuery(e.target.value);
+          }}
         />
       </label>
 
@@ -79,34 +117,60 @@ export function History() {
         {FILTERS.map((f) => (
           <button
             key={f.id}
-            className={`rounded-full px-3 py-1.5 text-[0.8125rem] transition-colors ${
+            className={`min-h-11 rounded-full px-3 text-[0.8125rem] transition-colors ${
               filter === f.id ? 'bg-surface-2 text-ink' : 'text-ink-3'
             }`}
-            onClick={() => setFilter(f.id)}
+            onClick={() => {
+              resetWindow();
+              setFilter(f.id);
+            }}
+            aria-pressed={filter === f.id}
           >
-            {f.label}
+            {t(f.labelKey)}
           </button>
         ))}
       </div>
 
       {groups.length === 0 ? (
         <div className="mt-16 flex flex-col items-center gap-2 text-center">
-          <div className="text-[0.9375rem] text-ink-2">Ничего не нашлось</div>
+          <div className="text-[0.9375rem] text-ink-2">{t('history.empty.title')}</div>
           <div className="max-w-56 text-[0.8125rem] text-ink-3">
-            Попробуй другое название — например, «Такси» или «Продукты»
+            {t('history.empty.description')}
           </div>
         </div>
       ) : (
-        groups.map(([key, rows]) => (
-          <section key={key} className="mt-4">
-            <h2 className="kicker px-1">{fmtDay(rows[0].createdAt)}</h2>
-            <div className="mt-1">
-              {rows.map((tx) => (
-                <TxRow key={tx.id} tx={tx} />
-              ))}
-            </div>
-          </section>
-        ))
+        <>
+          {visibleGroups.map(([key, rows], index) => (
+            <section key={key} className="mt-4">
+              <h2
+                ref={index === focusGroupIndex ? nextGroupHeadingRef : undefined}
+                className="kicker px-1"
+                tabIndex={-1}
+              >
+                {fmtDay(rows[0].createdAt, locale)}
+              </h2>
+              <div className="mt-1">
+                {rows.map((tx) => (
+                  <TxRow key={tx.id} tx={tx} currency={activeAccount.currency} />
+                ))}
+              </div>
+            </section>
+          ))}
+          {visibleGroups.length < groups.length ? (
+            <button
+              type="button"
+              className="mt-5 min-h-11 w-full rounded-btn border border-line bg-surface px-4 text-[0.875rem] font-medium text-ink-2 transition-colors hover:bg-surface-2 active:bg-surface-2"
+              onClick={revealMore}
+            >
+              {t('history.showMore')}
+            </button>
+          ) : null}
+          <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+            {announcedVisibleCount > 0
+              ? t('history.revealed', { visible: announcedVisibleCount, total: groups.length })
+              : ''}
+          </span>
+        </>
       )}
     </div>
   );

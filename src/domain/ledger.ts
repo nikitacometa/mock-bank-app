@@ -26,7 +26,22 @@ export function appendRow(
   state: BankState,
   row: Omit<Transaction, 'seq' | 'balanceAfterMinor' | 'id'>,
 ): BankState {
+  if (!Number.isSafeInteger(row.amountMinor)) {
+    throw new RangeError('Transaction amount must be a safe integer');
+  }
+  if (
+    !Number.isSafeInteger(state.nextSeq) ||
+    state.nextSeq <= 0 ||
+    state.nextSeq >= Number.MAX_SAFE_INTEGER
+  ) {
+    throw new RangeError('Transaction sequence is exhausted');
+  }
+
   const balance = balanceOf(state, row.accountId) + row.amountMinor;
+  if (!Number.isSafeInteger(balance)) {
+    throw new RangeError('Resulting balance must be a safe integer');
+  }
+
   const tx: Transaction = {
     ...row,
     id: `tx_${state.nextSeq}`,

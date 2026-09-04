@@ -287,6 +287,8 @@ const CATEGORY_ICONS: Record<string, (props: P) => ReturnType<typeof IconDot>> =
 };
 
 export function CategoryIcon({ category, ...props }: P & { category?: string }) {
-  const Icon = (category && CATEGORY_ICONS[category]) || IconDot;
+  const Icon = category && Object.hasOwn(CATEGORY_ICONS, category)
+    ? CATEGORY_ICONS[category]
+    : IconDot;
   return <Icon {...props} />;
 }

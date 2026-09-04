@@ -1,4 +1,24 @@
-@import 'tailwindcss';
+@import 'tailwindcss' source('../');
+
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src:
+    url('/fonts/Geist-Variable.woff2') format('woff2'),
+    url('/fonts/Geist-Variable.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src:
+    url('/fonts/GeistMono-Variable.woff2') format('woff2'),
+    url('/fonts/GeistMono-Variable.ttf') format('truetype');
+}
 
 /*
  * Cometa design tokens — single semantic set (docs/spec.md §5.4).
@@ -15,7 +35,7 @@
   --color-line: oklch(0.26 0.015 252);
   --color-ink: oklch(0.93 0.006 252);
   --color-ink-2: oklch(0.72 0.012 252);
-  --color-ink-3: oklch(0.54 0.014 252);
+  --color-ink-3: oklch(0.61 0.014 252);
 
   /* brand — warm ivory against the cold base; mint strictly = growth/success */
   --color-ivory: oklch(0.945 0.022 84);
@@ -45,6 +65,36 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+/* Telegram always owns viewport/safe areas. */
+:root[data-platform='telegram'] {
+  --app-height: var(--tg-viewport-stable-height, 100dvh);
+  /* Device and browser insets overlap; Telegram content obstruction is an
+     additional margin (fullscreen controls sit below the status bar). */
+  --safe-top: calc(
+    max(
+      env(safe-area-inset-top, 0px),
+      var(--tg-viewport-safe-area-inset-top, 0px)
+    ) + var(--tg-viewport-content-safe-area-inset-top, 0px)
+  );
+  --safe-bottom: calc(
+    max(
+      env(safe-area-inset-bottom, 0px),
+      var(--tg-viewport-safe-area-inset-bottom, 0px)
+    ) + var(--tg-viewport-content-safe-area-inset-bottom, 0px)
+  );
+}
+
+/* Dark-only product: host neutrals are safe to bind only when the host is also dark. */
+:root[data-platform='telegram'][data-color-scheme='dark'] {
+  --color-bg: var(--tg-theme-bg-color, oklch(0.125 0.012 252));
+  --color-surface: var(--tg-theme-secondary-bg-color, oklch(0.165 0.014 252));
+  --color-surface-2: var(--tg-theme-section-bg-color, oklch(0.205 0.016 252));
+  --color-line: var(--tg-theme-section-separator-color, oklch(0.26 0.015 252));
+  --color-ink: var(--tg-theme-text-color, oklch(0.93 0.006 252));
+  --color-ink-2: var(--tg-theme-subtitle-text-color, oklch(0.72 0.012 252));
+  --color-ink-3: var(--tg-theme-hint-color, oklch(0.61 0.014 252));
+}
+
 @layer base {
   html {
     background: var(--color-bg);
@@ -64,6 +114,19 @@
   button {
     font: inherit;
     color: inherit;
+    min-width: 0;
+  }
+  :where(button, a, input, [tabindex]):focus-visible {
+    outline: 2px solid color-mix(in oklch, var(--color-ivory) 82%, transparent);
+    outline-offset: 2px;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  @media (hover: hover) {
+    button:not(:disabled) {
+      cursor: pointer;
+    }
   }
   /* money and card numbers: guaranteed equal-width digits */
   .num {
@@ -115,6 +178,12 @@
   }
   .toast-enter {
     animation: rise-in 220ms var(--ease-out-premium);
+  }
+  @media (min-width: 520px) {
+    .app-shell {
+      border-inline: 1px solid color-mix(in oklch, var(--color-line) 65%, transparent);
+      box-shadow: 0 0 4rem oklch(0.04 0.01 252 / 45%);
+    }
   }
   @media (prefers-reduced-motion: reduce) {
     *,

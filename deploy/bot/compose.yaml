@@ -1,0 +1,56 @@
+name: cometa-bank-bot
+
+services:
+  bot:
+    image: cometa-bank-bot:${COMETA_BOT_IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: deploy/bot/Dockerfile
+    restart: unless-stopped
+    init: true
+    user: "1000:1000"
+    environment:
+      BOT_TOKEN_FILE: /run/secrets/bot_token
+      PUBLIC_WEB_APP_URL: https://euphoria.bot/
+      DATA_PATH: /data/cometa-bank.sqlite
+      PORT: "8787"
+    volumes:
+      - type: bind
+        source: /etc/cometa-bank/secrets/bot_token
+        target: /run/secrets/bot_token
+        read_only: true
+      - type: bind
+        source: /home/metaflexer/euphoria.bot/bot-data
+        target: /data
+    ports:
+      - "127.0.0.1:8787:8787"
+    networks:
+      bot-edge:
+        aliases:
+          - cometa-bank-bot
+        priority: 1000
+      bot-egress:
+        gw_priority: 1
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+networks:
+  bot-edge:
+    external: true
+    name: cometa_bank_edge
+  bot-egress:
+    driver: bridge
+    internal: false
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"

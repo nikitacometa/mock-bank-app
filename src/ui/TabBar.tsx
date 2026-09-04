@@ -1,29 +1,31 @@
 import { useUiStore, type Screen } from '@/store/uiStore';
 import { usePlatform } from '@/platform/usePlatform';
+import { useI18n, type TranslationKey } from '@/i18n';
 import { IconCards, IconHistory, IconHome, IconTransfer } from './icons';
 
-const TABS: Array<{ screen: Screen; label: string; Icon: typeof IconHome }> = [
-  { screen: 'home', label: 'Главная', Icon: IconHome },
-  { screen: 'history', label: 'История', Icon: IconHistory },
+const TABS: Array<{ screen: Screen; labelKey: TranslationKey; Icon: typeof IconHome }> = [
+  { screen: 'home', labelKey: 'nav.home', Icon: IconHome },
+  { screen: 'history', labelKey: 'nav.history', Icon: IconHistory },
 ];
 
 export function TabBar() {
   const screen = useUiStore((s) => s.screen);
   const setScreen = useUiStore((s) => s.setScreen);
-  const openSheet = useUiStore((s) => s.openSheet);
+  const openGlobalTransfer = useUiStore((s) => s.openGlobalTransfer);
   const platform = usePlatform();
+  const { t } = useI18n();
 
-  const tab = (t: (typeof TABS)[number]) => (
+  const tab = (entry: (typeof TABS)[number]) => (
     <button
-      key={t.screen}
+      key={entry.screen}
       className={`flex flex-1 flex-col items-center gap-1 py-2 transition-colors ${
-        screen === t.screen ? 'text-ink' : 'text-ink-3'
+        screen === entry.screen ? 'text-ink' : 'text-ink-3'
       }`}
-      onClick={() => setScreen(t.screen)}
-      aria-current={screen === t.screen ? 'page' : undefined}
+      onClick={() => setScreen(entry.screen)}
+      aria-current={screen === entry.screen ? 'page' : undefined}
     >
-      <t.Icon size={22} />
-      <span className="text-[0.6875rem] leading-none">{t.label}</span>
+      <entry.Icon size={22} />
+      <span className="text-[0.6875rem] leading-none">{t(entry.labelKey)}</span>
     </button>
   );
 
@@ -37,11 +39,11 @@ export function TabBar() {
         {tab(TABS[1])}
         <div className="flex flex-1 items-center justify-center">
           <button
-            aria-label="Перевод"
-            className="-mt-5 flex size-14 items-center justify-center rounded-full bg-ivory text-bg shadow-lg shadow-black/35 transition-transform active:scale-95"
+            aria-label={t('nav.transfer')}
+            className="-mt-5 flex size-14 items-center justify-center rounded-full bg-ivory text-bg shadow-lg shadow-bg/35 transition-transform active:scale-95"
             onClick={() => {
               platform.haptic('light');
-              openSheet({ kind: 'transferContact' });
+              openGlobalTransfer();
             }}
           >
             <IconTransfer size={24} />
@@ -55,7 +57,7 @@ export function TabBar() {
           aria-current={screen === 'cards' ? 'page' : undefined}
         >
           <IconCards size={22} />
-          <span className="text-[0.6875rem] leading-none">Карты</span>
+          <span className="text-[0.6875rem] leading-none">{t('nav.cards')}</span>
         </button>
       </div>
     </nav>

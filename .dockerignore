@@ -1,0 +1,15 @@
+.git
+.github
+.playwright-cli
+.wrangler
+bot/dist
+dist
+docs
+node_modules
+output
+*.local
+*.log
+*.pem
+*.key
+.env
+.env.*

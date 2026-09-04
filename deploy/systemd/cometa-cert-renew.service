@@ -1,0 +1,10 @@
+[Unit]
+Description=Renew shared Cometa proxy certificates and reload Nginx safely
+
+[Service]
+Type=oneshot
+ExecStart=/home/metaflexer/bin/cometa-cert-renew
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+TimeoutStartSec=30min

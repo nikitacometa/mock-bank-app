@@ -1,0 +1,11 @@
+# Merge this file with the authoritative shared-proxy Compose file on every
+# proxy lifecycle command. The edge bridge must exist before Compose runs.
+services:
+  proxy:
+    networks:
+      cometa-bank-edge: null
+
+networks:
+  cometa-bank-edge:
+    external: true
+    name: cometa_bank_edge
