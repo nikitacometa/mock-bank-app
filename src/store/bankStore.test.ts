@@ -577,11 +577,13 @@ describe('useBankStore exchange rates', () => {
     vi.stubGlobal('fetch', fetchMock);
     const { useBankStore } = await import('./bankStore');
     const current = useBankStore.getState();
+    const now = new Date();
     useBankStore.setState({
       exchangeRates: {
         ...current.exchangeRates,
         source: 'frankfurter',
-        fetchedAt: new Date().toISOString(),
+        asOf: now.toISOString().slice(0, 10),
+        fetchedAt: now.toISOString(),
       },
     });
 
