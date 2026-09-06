@@ -4,6 +4,7 @@ import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LaunchState, PlatformAdapter } from '@/platform/types';
+import { markStickyServerLedgerMode } from '@/platform/ledgerAuthorityReceipt';
 import { buildSeed } from '@/domain/seed';
 import { useBankStore } from '@/store/bankStore';
 import { quarantineTelegramPersistence } from '@/store/persistence';
@@ -116,13 +117,49 @@ describe('Telegram foreground synchronization ownership', () => {
     await act(async () => document.dispatchEvent(new Event('visibilitychange')));
   }
 
-  it('finishes a local-mode foreground sync after quarantine unmounts the bank shell', async () => {
+  it('preserves an unsent transfer draft through same-identity local foreground success, failure and retry', async () => {
+    await act(async () => useUiStore.getState().openSheet({ kind: 'transferOwn' }));
+    const dialog = document.querySelector('[role="dialog"]');
+    if (dialog === null) throw new Error('Transfer dialog is missing');
+    for (const digit of ['1', '2', '3']) {
+      const key = dialog.querySelector<HTMLButtonElement>(`button[aria-label="${digit}"]`);
+      if (key === null) throw new Error(`Transfer keypad ${digit} is missing`);
+      await act(async () => key.click());
+    }
+    expect(dialog.querySelector('output')?.textContent).toContain('123');
+    const pending = pendingBootstrap();
+    await foreground();
+
+    expect(document.querySelector('[role="dialog"]')).toBe(dialog);
+    expect(dialog.querySelector('output')?.textContent).toContain('123');
+    expect(pending.signal().aborted).toBe(false);
+    await act(async () => pending.resolve(preferences()));
+    expect(document.querySelector('[role="dialog"]')).toBe(dialog);
+    expect(dialog.querySelector('output')?.textContent).toContain('123');
+
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const persisted = storage.get('cometa.bank.tma.user.42');
+    const failed = pendingBootstrap();
+    await foreground();
+    await act(async () => failed.reject(new TypeError('Connection interrupted')));
+    expect(useBankStore.getState().ledgerMode).toBe('local');
+    expect(document.querySelector('[role="dialog"]')).toBe(dialog);
+    expect(dialog.querySelector('output')?.textContent).toContain('123');
+    const retry = pendingBootstrap();
+    await foreground();
+    await act(async () => retry.resolve(preferences()));
+    expect(document.querySelector('[role="dialog"]')).toBe(dialog);
+    expect(dialog.querySelector('output')?.textContent).toContain('123');
+    expect(storage.get('cometa.bank.tma.user.42')).toBe(persisted);
+  });
+
+  it('finishes a verified local-mode foreground sync without unmounting the bank shell', async () => {
     const persisted = storage.get('cometa.bank.tma.user.42');
     const pending = pendingBootstrap();
     await foreground();
 
-    expect(useBankStore.getState().ledgerMode).toBe('read_only');
-    expect(container.querySelector('main')).toBeNull();
+    expect(useBankStore.getState().ledgerMode).toBe('local');
+    expect(container.querySelector('main h1')?.textContent).toBe('Cometa');
     expect(pending.signal().aborted).toBe(false);
     expect(storage.get('cometa.bank.tma.user.42')).toBe(persisted);
 
@@ -132,7 +169,7 @@ describe('Telegram foreground synchronization ownership', () => {
     expect(storage.get('cometa.bank.tma.user.42')).toBe(persisted);
   });
 
-  it('retries a failed foreground bootstrap while the bank shell remains quarantined', async () => {
+  it('retries a failed verified local foreground bootstrap without changing the bank state', async () => {
     const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const persisted = storage.get('cometa.bank.tma.user.42');
     const failed = pendingBootstrap();
@@ -140,7 +177,7 @@ describe('Telegram foreground synchronization ownership', () => {
     await act(async () => failed.reject(new TypeError('Connection interrupted')));
 
     expect(warnings).toHaveBeenCalledWith('[telegram] foreground bank sync failed: Connection interrupted');
-    expect(useBankStore.getState().ledgerMode).toBe('read_only');
+    expect(useBankStore.getState().ledgerMode).toBe('local');
     expect(storage.get('cometa.bank.tma.user.42')).toBe(persisted);
     const retry = pendingBootstrap();
     await foreground();
@@ -149,6 +186,24 @@ describe('Telegram foreground synchronization ownership', () => {
 
     expect(useBankStore.getState().ledgerMode).toBe('local');
     expect(container.querySelector('main h1')?.textContent).toBe('Cometa');
+    expect(storage.get('cometa.bank.tma.user.42')).toBe(persisted);
+  });
+
+  it('quarantines a formerly local session when a sticky server marker appears and refuses local fallback', async () => {
+    const persisted = storage.get('cometa.bank.tma.user.42');
+    expect(markStickyServerLedgerMode('42')).toBe(true);
+    const pending = pendingBootstrap();
+    await foreground();
+
+    expect(useBankStore.getState().ledgerMode).toBe('read_only');
+    expect(useBankStore.getState().ledgerSyncError).toBe('server_sync_required');
+    expect(container.querySelector('main')).toBeNull();
+    expect(pending.signal().aborted).toBe(false);
+    await act(async () => pending.resolve(preferences()));
+
+    expect(useBankStore.getState().ledgerMode).toBe('read_only');
+    expect(useBankStore.getState().ledgerSyncError).toBe('server_api_unavailable');
+    expect(container.querySelector('main')).toBeNull();
     expect(storage.get('cometa.bank.tma.user.42')).toBe(persisted);
   });
 

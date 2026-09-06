@@ -554,12 +554,16 @@ export const useBankStore = create<BankStore>()((set, get) => {
       ) {
         if (serverGateway?.telegramId !== telegramId) {
           serverGateway = null;
-          set({
-            ledgerMode: 'read_only',
-            ledgerSyncError: hasStickyServerLedgerMode(telegramId)
-              ? 'server_sync_required'
-              : null,
-          });
+          const requiresServerSync = hasStickyServerLedgerMode(telegramId);
+          // This exact launch session already verified the local bridge. Keep
+          // its mounted drafts during foreground refresh; a new fingerprint
+          // still enters quarantine below, and sticky authority never falls back.
+          if (get().ledgerMode !== 'local' || requiresServerSync) {
+            set({
+              ledgerMode: 'read_only',
+              ledgerSyncError: requiresServerSync ? 'server_sync_required' : null,
+            });
+          }
         }
         return !isCurrentPersistenceDirty();
       }
