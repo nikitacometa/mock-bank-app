@@ -21,8 +21,20 @@ export const webAdapter: PlatformAdapter = {
     return { displayName: 'Никита', source: 'demo' };
   },
 
-  async loadLaunchPreferences() {
+  async loadLaunchState() {
     return null;
+  },
+
+  async importBankState() {
+    throw new TypeError('Server ledger is unavailable on web');
+  },
+
+  async executeBankCommand() {
+    throw new TypeError('Server ledger is unavailable on web');
+  },
+
+  async refreshBankRates() {
+    throw new TypeError('Server ledger is unavailable on web');
   },
 
   haptic(kind) {

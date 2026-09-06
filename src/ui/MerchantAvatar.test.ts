@@ -18,6 +18,7 @@ describe('MerchantAvatar', () => {
     ['GOPAY-TOKOPEDIA', 'gopay'],
     ['GOJEK * RIDE', 'gojek'],
     ['APPLE.COM/BILL', 'apple-store'],
+    ['Apple', 'apple-store'],
     ['AirAsia X', 'airasia'],
     ['SCOOT AIR', 'scoot'],
     ['12GO ASIA', '12go'],

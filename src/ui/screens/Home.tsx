@@ -16,7 +16,11 @@ import type {
 } from '@/domain/types';
 import { APP_NAME } from '@/app/config';
 import { useI18n, type AppLocale } from '@/i18n';
-import { localizeDemoText } from '../format';
+import {
+  accountDisplayName,
+  buildOwnTransferCounterpartIndex,
+  localizeDemoText,
+} from '../format';
 import { HeroAmount } from '../primitives/Amount';
 import { useCountUp } from '../primitives/useCountUp';
 import { TxRow } from '../TxRow';
@@ -152,15 +156,18 @@ function QuickAction({
   label,
   icon,
   onClick,
+  disabled = false,
 }: {
   label: string;
   icon: React.ReactNode;
   onClick: () => void;
+  disabled?: boolean;
 }) {
   return (
     <button
-      className="flex flex-1 flex-col items-center gap-2 rounded-card bg-surface py-4 transition-colors active:bg-surface-2"
+      className="flex flex-1 flex-col items-center gap-2 rounded-card bg-surface py-4 transition-colors active:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
       onClick={onClick}
+      disabled={disabled}
     >
       <span className="text-ink-2">{icon}</span>
       <span className="text-[0.8125rem]">{label}</span>
@@ -246,13 +253,23 @@ export function Home() {
   const platform = usePlatform();
   const { locale, t } = useI18n();
 
-  const account = accounts.find((a) => a.id === activeAccountId) ?? accounts[0];
-  const balance = balanceOf({ transactions }, account.id);
-  const monthlyInterest = useMonthlyInterest(account.id);
+  const activeAccounts = useMemo(
+    () => accounts.filter((candidate) => candidate.status === 'active'),
+    [accounts],
+  );
+  const ownTransferCounterparts = useMemo(
+    () => buildOwnTransferCounterpartIndex(accounts, transactions),
+    [accounts, transactions],
+  );
+  const account =
+    activeAccounts.find((a) => a.id === activeAccountId) ?? activeAccounts[0] ?? accounts[0];
+  const accountId = account?.id ?? '';
+  const balance = account === undefined ? 0 : balanceOf({ transactions }, account.id);
+  const monthlyInterest = useMonthlyInterest(accountId);
   const user = platform.getCurrentUser();
   const userDisplayName = resolveUserDisplayName(profile, user, locale);
   const portfolioDisplay = derivePortfolioDisplay({
-    accounts,
+    accounts: activeAccounts,
     transactions,
     primaryCurrency,
     exchangeRates,
@@ -262,11 +279,17 @@ export function Home() {
   const recent = useMemo(
     () =>
       transactions
-        .filter((t) => t.accountId === account.id)
-        .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.seq - a.seq)
+        .filter((t) => t.accountId === accountId)
+        .sort((a, b) =>
+          (b.effectiveDate ?? b.createdAt.slice(0, 10)).localeCompare(
+            a.effectiveDate ?? a.createdAt.slice(0, 10),
+          ) || b.seq - a.seq,
+        )
         .slice(0, 4),
-    [transactions, account.id],
+    [transactions, accountId],
   );
+
+  if (account === undefined) return null;
 
   return (
     <div className="px-4 pb-28" style={{ paddingTop: 'calc(var(--safe-top) + 0.75rem)' }}>
@@ -294,7 +317,7 @@ export function Home() {
 
       <div className="scrollbar-none -mx-4 mt-1 overflow-x-auto px-4 pb-2">
         <AccountStrip
-          accounts={accounts}
+          accounts={activeAccounts}
           value={account.id}
           onChange={setActiveAccount}
           label={t('home.accountPicker')}
@@ -318,7 +341,7 @@ export function Home() {
             <CurrencyBadge currency={account.currency} size={42} />
             <div className="min-w-0">
               <div className="truncate text-[0.9375rem] font-medium">
-                {localizeDemoText(account.name, locale)}
+                {accountDisplayName(account, locale)}
               </div>
               <div className="num mt-0.5 text-[0.75rem] text-ink-3">
                 {account.currency} ·· {account.number.slice(-4)}
@@ -389,6 +412,7 @@ export function Home() {
           label={t('home.action.ownTransfer')}
           icon={<IconArrowDown size={21} />}
           onClick={() => openSheet({ kind: 'transferOwn' })}
+          disabled={activeAccounts.length < 2}
         />
         <QuickAction
           label={t('home.action.details')}
@@ -410,7 +434,12 @@ export function Home() {
         </div>
         <div className="mt-2">
           {recent.map((tx) => (
-            <TxRow key={tx.id} tx={tx} currency={account.currency} />
+            <TxRow
+              key={tx.id}
+              tx={tx}
+              currency={account.currency}
+              ownTransferCounterparts={ownTransferCounterparts}
+            />
           ))}
         </div>
       </section>

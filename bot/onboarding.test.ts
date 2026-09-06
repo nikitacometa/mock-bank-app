@@ -2,9 +2,12 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { bankDomainAdapter } from './bank-domain.js';
 import { TelegramApiError } from './bot-api.js';
+import { BankAuthorityService } from './bank-service.js';
 import { OnboardingEngine } from './onboarding.js';
 import { PreferencesRepository } from './repository.js';
+import { commandsForLedgerMode } from './setup.js';
 import type {
   BotTransport,
   InlineKeyboardMarkup,
@@ -117,6 +120,26 @@ function webAppUrls(markup: InlineKeyboardMarkup | undefined): string[] {
   ) ?? [];
 }
 
+function productionWiredEngine(
+  repository: PreferencesRepository,
+  transport: BotTransport,
+): OnboardingEngine {
+  const bankService = new BankAuthorityService(
+    repository,
+    bankDomainAdapter,
+    () => new Date('2026-09-05T12:00:00.000Z'),
+  );
+  return new OnboardingEngine(
+    repository,
+    transport,
+    WEB_APP_URL,
+    { warn: () => undefined },
+    async () => undefined,
+    () => Date.parse('2026-09-05T12:00:00.000Z'),
+    bankService,
+  );
+}
+
 describe('OnboardingEngine', () => {
   let repository: PreferencesRepository;
   let transport: FakeTransport;
@@ -214,18 +237,32 @@ describe('OnboardingEngine', () => {
     expect(webAppUrls(transport.sent[0]?.replyMarkup)).toEqual([]);
   });
 
-  it('resumes /start at the persisted custom-name prompt', async () => {
+  it('lets /start cancel the persisted custom-name prompt', async () => {
     await engine.handleUpdate(messageUpdate(1, '/start'));
     repository.updateUser('42', { stage: 'custom_name' });
     transport.sent.length = 0;
 
     await engine.handleUpdate(messageUpdate(2, '/start'));
 
-    expect(transport.sent).toEqual([{
-      chatId: '42',
-      text: '<b>Your name in Cometa</b>\nSend it in one message: up to 48 characters, without control characters.',
-      replyMarkup: undefined,
-    }]);
+    expect(repository.getUser('42')).toMatchObject({ stage: 'complete' });
+    expect(transport.sent).toHaveLength(1);
+    expect(transport.sent[0]?.text).toContain('<b>Welcome back, Ada Lovelace</b>');
+    expect(transport.sent[0]?.text).not.toContain('<b>Your name in Cometa</b>');
+  });
+
+  it('lets /cancel leave the custom-name prompt without changing the name', async () => {
+    await engine.handleUpdate(messageUpdate(1, '/start'));
+    repository.updateUser('42', { stage: 'custom_name' });
+    transport.sent.length = 0;
+
+    await engine.handleUpdate(messageUpdate(2, '/cancel'));
+
+    expect(repository.getUser('42')).toMatchObject({
+      stage: 'complete',
+      displayName: 'Ada Lovelace',
+    });
+    expect(transport.sent).toHaveLength(1);
+    expect(transport.sent[0]?.text).toContain('<b>Welcome back, Ada Lovelace</b>');
   });
 
   it('runs Russian language selection through all eight currencies to a launch summary', async () => {
@@ -555,6 +592,47 @@ describe('OnboardingEngine', () => {
     expect(webAppUrls(transport.sent[0]?.replyMarkup)).toEqual(['https://euphoria.bot/']);
   });
 
+  it('keeps returning /start on the local launch card when production wires bank authority', async () => {
+    const localEngine = productionWiredEngine(repository, transport);
+    repository.ensureUser({
+      telegramUserId: '42',
+      locale: 'en',
+      primaryCurrency: 'KZT',
+      displayName: 'Ada Lovelace',
+    });
+    repository.updateUser('42', { stage: 'complete' });
+
+    expect(repository.ledgerMode()).toBe('local');
+    await localEngine.handleUpdate(messageUpdate(1, '/start'));
+
+    expect(transport.sent).toHaveLength(1);
+    expect(transport.sent[0]?.text).toContain('<b>Welcome back, Ada Lovelace</b>');
+    expect(transport.sent[0]?.text).not.toContain('Bank commands are almost ready');
+    expect(webAppUrls(transport.sent[0]?.replyMarkup)).toEqual(['https://euphoria.bot/']);
+  });
+
+  it('keeps local language callbacks on ready cards when production wires bank authority', async () => {
+    const localEngine = productionWiredEngine(repository, transport);
+    repository.ensureUser({
+      telegramUserId: '42',
+      locale: 'en',
+      primaryCurrency: 'KZT',
+      displayName: 'Ada Lovelace',
+    });
+    repository.updateUser('42', { stage: 'complete' });
+
+    await localEngine.handleUpdate(callbackUpdate(1, 'lang:ru'));
+
+    expect(transport.sent.at(-1)?.text).toContain('<b>Cometa готова</b>');
+    expect(transport.sent.at(-1)?.text).not.toContain('Банковские команды скоро включатся');
+
+    await localEngine.handleUpdate(callbackUpdate(2, 'setlang:en'));
+
+    expect(transport.sent.at(-1)?.text).toContain('<b>Cometa is ready</b>');
+    expect(transport.sent.at(-1)?.text).not.toContain('Bank commands are almost ready');
+    expect(repository.getUser('42')).toMatchObject({ locale: 'en', stage: 'complete' });
+  });
+
   it('serves localized settings and help commands', async () => {
     await engine.handleUpdate(messageUpdate(1, '/start'));
     await engine.handleUpdate(messageUpdate(2, '/settings'));
@@ -569,17 +647,56 @@ describe('OnboardingEngine', () => {
     expect(transport.sent.at(-1)?.text).toContain('Rates are for reference');
   });
 
+  it('gates published commands and help copy until server ledger authority is active', async () => {
+    expect(commandsForLedgerMode('local', 'en').map(({ command }) => command)).toEqual([
+      'start',
+      'settings',
+      'help',
+      'privacy',
+    ]);
+    expect(commandsForLedgerMode('local', 'ru').map(({ command }) => command)).toEqual([
+      'start',
+      'settings',
+      'help',
+      'privacy',
+    ]);
+
+    await engine.handleUpdate(messageUpdate(1, '/help'));
+    const localHelp = transport.sent.at(-1)?.text ?? '';
+    expect(localHelp).toContain('/settings');
+    expect(localHelp).toContain('/privacy');
+    expect(localHelp).not.toMatch(/\/(?:add|accounts|recurring|cancel)\b/);
+
+    repository.setLedgerMode('server');
+    await engine.handleUpdate(messageUpdate(2, '/help'));
+    const serverHelp = transport.sent.at(-1)?.text ?? '';
+    expect(serverHelp).toContain('/add');
+    expect(serverHelp).toContain('/accounts');
+    expect(serverHelp).toContain('/recurring');
+    expect(serverHelp).toContain('/cancel');
+    expect(commandsForLedgerMode('server', 'en').map(({ command }) => command)).toEqual([
+      'start',
+      'add',
+      'accounts',
+      'recurring',
+      'settings',
+      'cancel',
+      'help',
+      'privacy',
+    ]);
+  });
+
   it('serves an exact RU/EN privacy disclosure from the registered command', async () => {
     await engine.handleUpdate(messageUpdate(1, '/privacy@MyBankApp_Bot'));
 
     const english = transport.sent.at(-1)?.text ?? '';
     expect(english).toContain('<b>Cometa privacy</b>');
-    expect(english).toContain('Telegram user and private chat IDs');
-    expect(english).toContain('interface language, primary currency, optional display name');
-    expect(english).toContain('onboarding stage, preference revision, and revision epoch');
+    expect(english).toContain('fictional accounts, ledger entries, recurring rules');
+    expect(english).toContain('separately for your Telegram ID');
     expect(english).toContain('processed update IDs');
-    expect(english).toContain('a pending reply');
-    expect(english).toContain('balances, accounts, cards, and the transaction ledger stay on your device');
+    expect(english).toContain('undelivered replies');
+    expect(english).toContain('web demo outside Telegram remains device-local');
+    expect(english).toContain('Automated export and deletion are not available yet');
     expect(english).toContain('does not process real payments or real money');
 
     await engine.handleUpdate(callbackUpdate(2, 'lang:ru'));
@@ -587,12 +704,12 @@ describe('OnboardingEngine', () => {
 
     const russian = transport.sent.at(-1)?.text ?? '';
     expect(russian).toContain('<b>Конфиденциальность Cometa</b>');
-    expect(russian).toContain('ID пользователя и приватного чата Telegram');
-    expect(russian).toContain('язык интерфейса, основную валюту, необязательное имя');
-    expect(russian).toContain('этап онбординга, revision настроек и revision epoch');
+    expect(russian).toContain('вымышленные счета, журнал операций, правила повторений');
+    expect(russian).toContain('для вашего Telegram ID');
     expect(russian).toContain('ID обработанных updates');
-    expect(russian).toContain('pending reply');
-    expect(russian).toContain('Мок-балансы, счета, карты и журнал операций остаются на вашем устройстве');
+    expect(russian).toContain('недоставленные ответы');
+    expect(russian).toContain('web-демка без Telegram остаётся только на устройстве');
+    expect(russian).toContain('Экспорт и удаление данных пока не автоматизированы');
     expect(russian).toContain('не проводит реальные платежи');
   });
 

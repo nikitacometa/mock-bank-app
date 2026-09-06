@@ -1,7 +1,8 @@
-import type { BankState, Contact, Money } from './types';
+import type { BankState, Contact, Currency, DemoFixtureId, Money } from './types';
 import { appendRow, balanceOf } from './ledger';
-import { applySettleAccount } from './interest';
+import { applySettleAccount, applySettleAll } from './interest';
 import { applyTransfer } from './transfer';
+import { CURRENCY_METADATA, convertMoney } from './currency';
 import { STATEMENT_ROWS } from './statementData';
 
 /**
@@ -48,7 +49,7 @@ const DAY_MS = 86_400_000;
 const KZT_MINOR_SCALE = 100;
 const CHECKING_FLOOR_MINOR = 50_000 * KZT_MINOR_SCALE;
 
-const FALLBACK_EXCHANGE_RATES: BankState['exchangeRates'] = {
+export const SEED_RATES_V1: BankState['exchangeRates'] = {
   base: 'USD',
   asOf: '2026-08-28',
   // Safely precedes the Aug 31 local-time conversions even at UTC+14.
@@ -84,15 +85,15 @@ function initials(name: string): string {
   return name.slice(0, 1).toUpperCase();
 }
 
-/** Build a local wall-clock timestamp because transaction time is rendered locally. */
+/** Freeze the accepted owner fixture to its original Bangkok wall-clock. */
 function atLocalDate(date: string, hour: number, minute: number): string {
-  const [year, month, day] = date.split('-').map(Number);
-  return new Date(year, month - 1, day, hour, minute, 0, 0).toISOString();
+  return new Date(
+    `${date}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00+07:00`,
+  ).toISOString();
 }
 
 function localDateAt(timestamp: number): string {
-  const date = new Date(timestamp);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  return new Date(timestamp + 7 * 60 * 60 * 1_000).toISOString().slice(0, 10);
 }
 
 interface SeedRow {
@@ -167,7 +168,7 @@ function scheduleRecentHistory(
   contacts: readonly Contact[],
 ): Money {
   const rand = mulberry32(20260902);
-  const startTimestamp = new Date(`${RECENT_HISTORY_START_DATE}T12:00:00`).getTime();
+  const startTimestamp = new Date(`${RECENT_HISTORY_START_DATE}T12:00:00+07:00`).getTime();
   let appliedNetMinor = 0;
   const scheduleCheckingRow = (
     createdAt: string,
@@ -184,8 +185,8 @@ function scheduleRecentHistory(
 
   for (let timestamp = startTimestamp; timestamp <= effectiveNowTimestamp; timestamp += DAY_MS) {
     const date = localDateAt(timestamp);
-    const day = new Date(timestamp).getDate();
-    const dayOfWeek = new Date(timestamp).getDay();
+    const day = Number(date.slice(8, 10));
+    const dayOfWeek = new Date(`${date}T00:00:00.000Z`).getUTCDay();
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
 
     if (day === 16) {
@@ -258,10 +259,10 @@ function scheduleRecentHistory(
   return appliedNetMinor;
 }
 
-export function buildSeed(nowISO: string): BankState {
+function buildOwnerKztSeed(nowISO: string): BankState {
   const requestedNowTimestamp = Date.parse(nowISO);
   if (!Number.isFinite(requestedNowTimestamp)) throw new RangeError('Seed timestamp must be valid');
-  const demoEndTimestamp = new Date(`${DEMO_DATA_END_DATE}T23:59:59`).getTime();
+  const demoEndTimestamp = new Date(`${DEMO_DATA_END_DATE}T23:59:59+07:00`).getTime();
   const effectiveNowTimestamp = Math.min(requestedNowTimestamp, demoEndTimestamp);
   const startISO = atLocalDate('2025-12-19', 6, 0);
   const contacts: Contact[] = CONTACT_NAMES.map((name, index) => ({
@@ -274,6 +275,8 @@ export function buildSeed(nowISO: string): BankState {
     {
       id: CHECKING_ID,
       type: 'checking',
+      role: 'primary-checking',
+      status: 'active',
       name: 'Текущий',
       currency: 'KZT',
       number: 'KZ86125KZT1001301123',
@@ -282,6 +285,8 @@ export function buildSeed(nowISO: string): BankState {
     {
       id: SAVINGS_ID,
       type: 'savings',
+      role: 'primary-savings',
+      status: 'active',
       name: 'Накопительный',
       currency: 'KZT',
       number: 'KZ11125KZT2001301124',
@@ -292,6 +297,8 @@ export function buildSeed(nowISO: string): BankState {
     {
       id: 'acc_usd',
       type: 'checking',
+      role: 'companion-1',
+      status: 'active',
       name: 'Доллары',
       currency: 'USD',
       number: 'KZ67125USD4001301126',
@@ -300,6 +307,8 @@ export function buildSeed(nowISO: string): BankState {
     {
       id: 'acc_eur',
       type: 'checking',
+      role: 'companion-2',
+      status: 'active',
       name: 'Евро',
       currency: 'EUR',
       number: 'KZ95125EUR5001301127',
@@ -309,7 +318,9 @@ export function buildSeed(nowISO: string): BankState {
 
   let state: BankState = {
     primaryCurrency: 'KZT',
-    exchangeRates: FALLBACK_EXCHANGE_RATES,
+    demoBaseCurrency: 'KZT',
+    fixtureId: 'owner-kzt-v1',
+    exchangeRates: SEED_RATES_V1,
     accounts,
     transactions: [],
     cards: [
@@ -321,6 +332,7 @@ export function buildSeed(nowISO: string): BankState {
     profile: { displayName: 'Никита' },
     nextSeq: 1,
     recentTransferIds: [],
+    recurringRules: [],
   };
 
   const openingBalances: Readonly<Record<string, Money>> = {
@@ -445,4 +457,213 @@ export function buildSeed(nowISO: string): BankState {
   }
 
   return { ...state, recentTransferIds: [] };
+}
+
+const SYNTHETIC_FIXTURE_IDS: Readonly<Record<Exclude<Currency, 'KZT'>, DemoFixtureId>> = {
+  THB: 'synthetic-thb-v1',
+  VND: 'synthetic-vnd-v1',
+  RUB: 'synthetic-rub-v1',
+  USD: 'synthetic-usd-v1',
+  EUR: 'synthetic-eur-v1',
+  IDR: 'synthetic-idr-v1',
+  GEL: 'synthetic-gel-v1',
+};
+
+const SYNTHETIC_MERCHANTS: Readonly<
+  Record<Exclude<Currency, 'KZT'>, readonly { name: string; category: string }[]>
+> = {
+  THB: [
+    { name: '7-Eleven', category: 'groceries' },
+    { name: 'Grab', category: 'transport' },
+    { name: 'LINE MAN', category: 'food' },
+    { name: 'Café Amazon', category: 'coffee' },
+    { name: 'BTS Rabbit', category: 'transport' },
+  ],
+  VND: [
+    { name: 'Highlands Coffee', category: 'coffee' },
+    { name: 'WinMart', category: 'groceries' },
+    { name: 'Grab', category: 'transport' },
+    { name: 'ShopeeFood', category: 'food' },
+    { name: 'Be', category: 'transport' },
+  ],
+  RUB: [
+    { name: 'Пятёрочка', category: 'groceries' },
+    { name: 'Самокат', category: 'groceries' },
+    { name: 'ВкусВилл', category: 'groceries' },
+    { name: 'Ozon', category: 'shopping' },
+    { name: 'Яндекс Go', category: 'transport' },
+  ],
+  USD: [
+    { name: "Trader Joe's", category: 'groceries' },
+    { name: 'Whole Foods', category: 'groceries' },
+    { name: 'Uber', category: 'transport' },
+    { name: 'DoorDash', category: 'food' },
+    { name: 'Apple', category: 'subscriptions' },
+  ],
+  EUR: [
+    { name: 'Lidl', category: 'groceries' },
+    { name: 'Carrefour', category: 'groceries' },
+    { name: 'Wolt', category: 'food' },
+    { name: 'Bolt', category: 'transport' },
+    { name: 'Deutsche Bahn', category: 'transport' },
+  ],
+  IDR: [
+    { name: 'Gojek', category: 'transport' },
+    { name: 'GoPay', category: 'transfer' },
+    { name: 'Tokopedia', category: 'shopping' },
+    { name: 'Indomaret', category: 'groceries' },
+    { name: 'Alfamart', category: 'groceries' },
+  ],
+  GEL: [
+    { name: 'Wolt', category: 'food' },
+    { name: 'Bolt', category: 'transport' },
+    { name: 'SPAR', category: 'groceries' },
+    { name: 'Magniti', category: 'groceries' },
+    { name: 'Magti', category: 'subscriptions' },
+  ],
+};
+
+const ROLE_TARGET_USD_CENTS = {
+  checking: 133_247,
+  savings: 2_142_427,
+  companion1: 80_000,
+  companion2: 46_454,
+} as const;
+
+const SYNTHETIC_EVENT_COUNT = 432;
+const SYNTHETIC_SCHEDULE_DAYS = 254;
+
+function visibleCurrencyAmount(usdCents: Money, currency: Currency): Money {
+  const converted = convertMoney(usdCents, 'USD', currency, SEED_RATES_V1);
+  const hiddenScale = 10n ** BigInt(
+    CURRENCY_METADATA[currency].minorUnits - CURRENCY_METADATA[currency].displayDigits,
+  );
+  if (hiddenScale === 1n) return converted;
+  const value = BigInt(converted);
+  const rounded = ((value + hiddenScale / 2n) / hiddenScale) * hiddenScale;
+  if (rounded > BigInt(Number.MAX_SAFE_INTEGER)) throw new RangeError('Synthetic amount overflow');
+  return Number(rounded);
+}
+
+/** Canonical companion-role currencies for every version-1 fixture. */
+export function fixtureCompanionCurrencies(base: Currency): readonly [Currency, Currency] {
+  if (base === 'USD') return ['EUR', 'KZT'];
+  if (base === 'EUR') return ['USD', 'KZT'];
+  return ['USD', 'EUR'];
+}
+
+function syntheticDate(index: number): { createdAt: string; effectiveDate: string } {
+  const start = Date.UTC(2025, 11, 20, 12, 0, 0, 0);
+  const dayOffset = Math.floor(
+    (index * SYNTHETIC_SCHEDULE_DAYS) / (SYNTHETIC_EVENT_COUNT - 1),
+  );
+  const firstIndexOnDay = Math.ceil(
+    (dayOffset * (SYNTHETIC_EVENT_COUNT - 1)) / SYNTHETIC_SCHEDULE_DAYS,
+  );
+  const timestamp = start + dayOffset * DAY_MS + (index - firstIndexOnDay) * 37 * 60_000;
+  const createdAt = new Date(timestamp).toISOString();
+  return { createdAt, effectiveDate: createdAt.slice(0, 10) };
+}
+
+function buildSyntheticSeed(nowISO: string, base: Exclude<Currency, 'KZT'>): BankState {
+  const requestedNow = Date.parse(nowISO);
+  if (!Number.isFinite(requestedNow)) throw new RangeError('Seed timestamp must be valid');
+  const effectiveNow = Math.min(requestedNow, Date.parse('2026-09-02T23:59:59.999Z'));
+  const [companion1, companion2] = fixtureCompanionCurrencies(base);
+  const startISO = '2025-12-19T12:00:00.000Z';
+  const accounts: BankState['accounts'] = [
+    { id: CHECKING_ID, type: 'checking', role: 'primary-checking', status: 'active', name: 'Current', currency: base, number: `CM01${base}000000000001`, createdAt: startISO },
+    { id: SAVINGS_ID, type: 'savings', role: 'primary-savings', status: 'active', name: 'Savings', currency: base, number: `CM02${base}000000000002`, apy: SAVINGS_APY, accrualAnchor: '2026-09-02T12:00:00.000Z', createdAt: startISO },
+    { id: `acc_${companion1.toLowerCase()}`, type: 'checking', role: 'companion-1', status: 'active', name: companion1, currency: companion1, number: `CM03${companion1}000000000003`, createdAt: startISO },
+    { id: `acc_${companion2.toLowerCase()}`, type: 'checking', role: 'companion-2', status: 'active', name: companion2, currency: companion2, number: `CM04${companion2}000000000004`, createdAt: startISO },
+  ];
+  const merchants = SYNTHETIC_MERCHANTS[base];
+  const events = Array.from({ length: SYNTHETIC_EVENT_COUNT }, (_, index) => {
+    const isIncome = index % 50 === 0;
+    const usdCents = isIncome ? 60_000 : 350 + ((index * 977) % 7_650);
+    const merchant = merchants[index % merchants.length];
+    return {
+      ...syntheticDate(index),
+      amountMinor: visibleCurrencyAmount(usdCents, base) * (isIncome ? 1 : -1),
+      kind: isIncome ? ('topup' as const) : ('purchase' as const),
+      counterparty: isIncome ? 'External account top up' : merchant.name,
+      category: isIncome ? 'transfer' : merchant.category,
+    };
+  });
+  const eventNet = events.reduce((sum, event) => sum + event.amountMinor, 0);
+  const checkingTarget = visibleCurrencyAmount(ROLE_TARGET_USD_CENTS.checking, base);
+  const openingChecking = checkingTarget - eventNet;
+  if (!Number.isSafeInteger(openingChecking) || openingChecking < 0) {
+    throw new RangeError('Synthetic opening balance is invalid');
+  }
+  const openingBalances: readonly Money[] = [
+    openingChecking,
+    visibleCurrencyAmount(ROLE_TARGET_USD_CENTS.savings, base),
+    visibleCurrencyAmount(ROLE_TARGET_USD_CENTS.companion1, companion1),
+    visibleCurrencyAmount(ROLE_TARGET_USD_CENTS.companion2, companion2),
+  ];
+  let state: BankState = {
+    primaryCurrency: base,
+    demoBaseCurrency: base,
+    fixtureId: SYNTHETIC_FIXTURE_IDS[base],
+    exchangeRates: SEED_RATES_V1,
+    accounts,
+    transactions: [],
+    cards: [
+      { id: 'card_1', accountId: CHECKING_ID, brand: 'visa', last4: '7213', holder: 'COMETA DEMO', expiry: '09/29', design: 'midnight', status: 'active' },
+      { id: 'card_2', accountId: accounts[2].id, brand: 'mastercard', last4: '4406', holder: 'COMETA DEMO', expiry: '01/28', design: 'ivory', status: 'active' },
+      { id: 'card_3', accountId: SAVINGS_ID, brand: 'visa', last4: '1187', holder: 'COMETA DEMO', expiry: '05/30', design: 'mint', status: 'active' },
+    ],
+    contacts: CONTACT_NAMES.map((name, index) => ({ id: `c_${index + 1}`, name, initials: initials(name) })),
+    profile: { displayName: 'Cometa' },
+    nextSeq: 1,
+    recentTransferIds: [],
+    recurringRules: [],
+  };
+  for (const [index, account] of accounts.entries()) {
+    state = appendRow(state, {
+      accountId: account.id,
+      amountMinor: openingBalances[index],
+      kind: 'seed',
+      counterparty: 'Opening balance',
+      category: 'other',
+      effectiveDate: '2025-12-19',
+      createdAt: new Date(Date.parse(startISO) + index * 60_000).toISOString(),
+    });
+  }
+  for (const event of events) {
+    if (Date.parse(event.createdAt) > effectiveNow) continue;
+    state = appendRow(state, { accountId: CHECKING_ID, ...event });
+  }
+  if (effectiveNow >= Date.parse('2026-08-31T23:59:59.999Z') && balanceOf(state, CHECKING_ID) !== checkingTarget) {
+    throw new Error('Synthetic checking calibration drifted');
+  }
+  return state;
+}
+
+/** Build a deterministic four-account fixture for any supported base currency. */
+export function buildSeed(nowISO: string, demoBaseCurrency: Currency = 'KZT'): BankState {
+  return demoBaseCurrency === 'KZT'
+    ? buildOwnerKztSeed(nowISO)
+    : buildSyntheticSeed(nowISO, demoBaseCurrency);
+}
+
+/** Explicit destructive fixture switch. Profile and the freshest known rates survive the reset. */
+export function rebuildDemoBase(
+  current: BankState,
+  demoBaseCurrency: Currency,
+  nowISO: string,
+): BankState {
+  const seeded = buildSeed(nowISO, demoBaseCurrency);
+  return applySettleAll(
+    {
+      ...seeded,
+      primaryCurrency: demoBaseCurrency,
+      exchangeRates: current.exchangeRates,
+      profile: current.profile,
+      recentTransferIds: [],
+      recurringRules: [],
+    },
+    nowISO,
+  );
 }

@@ -12,7 +12,7 @@ import {
   parseAmountInput,
 } from '@/domain/money';
 import type { TransferError } from '@/domain/transfer';
-import type { Currency, Money } from '@/domain/types';
+import type { Account, Currency, Money } from '@/domain/types';
 import {
   currencyName,
   useI18n,
@@ -25,7 +25,7 @@ import { Avatar } from '../../primitives/Avatar';
 import { IconBackspace } from '../../icons';
 import { AccountStrip } from '../../AccountStrip';
 import { createClientTransferId } from '../../clientTransferId';
-import { fmtRateDate, localizeDemoText } from '../../format';
+import { accountDisplayName, fmtRateDate, localizeDemoText } from '../../format';
 
 type Mode = 'contact' | 'own';
 
@@ -34,7 +34,8 @@ interface SuccessReceipt {
   readonly fromCurrency: Currency;
   readonly recipient:
     | { readonly kind: 'amount'; readonly amount: Money; readonly currency: Currency }
-    | { readonly kind: 'name'; readonly name?: string };
+    | { readonly kind: 'account'; readonly account: Account }
+    | { readonly kind: 'contact'; readonly name?: string };
 }
 
 interface ClientTransferIntent {
@@ -65,6 +66,8 @@ function transferErrorKey(error: TransferError): TranslationKey {
       return 'transfer.error.tooSmall';
     case 'invalid_exchange_rate':
       return 'transfer.error.rate';
+    case 'capacity':
+      return 'transfer.error.capacity';
     case 'balance_overflow':
       return 'transfer.error.overflow';
     default:
@@ -181,12 +184,21 @@ export function TransferSheet({ initialMode }: { initialMode: Mode }) {
   const activeAccountId = useUiStore((s) => s.activeAccountId);
   const platform = usePlatform();
   const { locale, t } = useI18n();
+  const activeAccounts = useMemo(
+    () => accounts.filter((account) => account.status === 'active'),
+    [accounts],
+  );
 
-  const [mode, setMode] = useState<Mode>(initialMode);
+  const [mode, setMode] = useState<Mode>(
+    initialMode === 'own' && activeAccounts.length < 2 ? 'contact' : initialMode,
+  );
   const [raw, setRaw] = useState('');
   const [contactId, setContactId] = useState<string | null>(null);
-  const active = accounts.find((account) => account.id === activeAccountId)?.id ?? accounts[0].id;
-  const other = accounts.find((account) => account.id !== active)?.id ?? active;
+  const active =
+    activeAccounts.find((account) => account.id === activeAccountId)?.id ??
+    activeAccounts[0]?.id ??
+    accounts[0].id;
+  const other = activeAccounts.find((account) => account.id !== active)?.id ?? active;
   const [ownFrom, setOwnFrom] = useState(active);
   const [ownTo, setOwnTo] = useState(other);
   const [contactFrom, setContactFrom] = useState(active);
@@ -214,13 +226,15 @@ export function TransferSheet({ initialMode }: { initialMode: Mode }) {
   );
 
   const localizedAccounts = useMemo(
-    () => accounts.map((account) => ({ ...account, name: localizeDemoText(account.name, locale) })),
-    [accounts, locale],
+    () => activeAccounts.map((account) => ({ ...account, name: accountDisplayName(account, locale) })),
+    [activeAccounts, locale],
   );
 
   const fromId = mode === 'own' ? ownFrom : contactFrom;
-  const fromAccount = accounts.find((account) => account.id === fromId) ?? accounts[0];
-  const toAccount = accounts.find((account) => account.id === ownTo) ?? accounts[0];
+  const fromAccount =
+    activeAccounts.find((account) => account.id === fromId) ?? activeAccounts[0] ?? accounts[0];
+  const toAccount =
+    activeAccounts.find((account) => account.id === ownTo) ?? activeAccounts[0] ?? accounts[0];
   const available = balanceOf({ transactions }, fromId);
   const amount = raw === '' ? null : parseAmountInput(raw, fromAccount.currency, locale);
   const insufficient = amount !== null && amount > available;
@@ -271,9 +285,11 @@ export function TransferSheet({ initialMode }: { initialMode: Mode }) {
           success.recipient.currency,
           locale,
         )
-      : success.recipient.name === undefined
-        ? t('transfer.recipientFallback')
-        : localizeDemoText(success.recipient.name, locale);
+      : success.recipient.kind === 'account'
+        ? accountDisplayName(success.recipient.account, locale)
+        : success.recipient.name === undefined
+          ? t('transfer.recipientFallback')
+          : localizeDemoText(success.recipient.name, locale);
     return `${formatMoney(success.amount, success.fromCurrency, locale)} → ${recipient}`;
   }, [locale, success, t]);
 
@@ -322,9 +338,9 @@ export function TransferSheet({ initialMode }: { initialMode: Mode }) {
                   amount: outcome.incomingAmountMinor,
                   currency: toAccount.currency,
                 }
-              : { kind: 'name', name: toAccount.name }
+              : { kind: 'account', account: toAccount }
             : {
-                kind: 'name',
+                kind: 'contact',
                 name: contacts.find((contact) => contact.id === contactId)?.name,
               };
         setSuccess({ amount, fromCurrency: fromAccount.currency, recipient });
@@ -373,10 +389,11 @@ export function TransferSheet({ initialMode }: { initialMode: Mode }) {
             {(['contact', 'own'] as const).map((m) => (
               <button
                 key={m}
-                className={`min-h-11 rounded-full px-3.5 py-1.5 text-[0.8125rem] transition-colors ${
+                className={`min-h-11 rounded-full px-3.5 py-1.5 text-[0.8125rem] transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
                   mode === m ? 'bg-surface-2 text-ink' : 'text-ink-3'
                 }`}
                 onClick={() => chooseMode(m)}
+                disabled={m === 'own' && activeAccounts.length < 2}
                 aria-pressed={mode === m}
               >
                 {m === 'contact' ? t('transfer.mode.contact') : t('transfer.mode.own')}

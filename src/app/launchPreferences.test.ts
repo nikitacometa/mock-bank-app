@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { LaunchPreferences, PlatformAdapter } from '@/platform/types';
+import { buildSeed } from '@/domain/seed';
+import type { LaunchPreferences, LaunchState, PlatformAdapter } from '@/platform/types';
 import { SCHEMA_VERSION, type AppliedLaunchPreferencesReceipt } from '@/store/persistence';
 import {
   synchronizeLaunchPreferences,
@@ -16,7 +17,7 @@ const PREFERENCES: LaunchPreferences = {
   telegramId: '9007199254740993',
 };
 
-function platform(value: LaunchPreferences | null): PlatformAdapter {
+function platform(value: LaunchState | null): PlatformAdapter {
   return {
     isTelegram: true,
     getCurrentUser: () => ({
@@ -24,7 +25,16 @@ function platform(value: LaunchPreferences | null): PlatformAdapter {
       source: 'host',
       ...(value === null ? {} : { telegramId: value.telegramId }),
     }),
-    loadLaunchPreferences: vi.fn(async () => value),
+    loadLaunchState: vi.fn(async () => value),
+    importBankState: vi.fn(async () => {
+      throw new Error('unexpected import');
+    }),
+    executeBankCommand: vi.fn(async () => {
+      throw new Error('unexpected command');
+    }),
+    refreshBankRates: vi.fn(async () => {
+      throw new Error('unexpected rate refresh');
+    }),
     haptic() {},
     copyText: async () => false,
     mainButton: { supported: false, show() {}, hide() {} },
@@ -34,7 +44,7 @@ function platform(value: LaunchPreferences | null): PlatformAdapter {
 
 function target(
   appliedRevision = 0,
-  persistence: { locale?: boolean; bank?: boolean; revision?: boolean } = {},
+  persistence: { locale?: boolean; bank?: boolean; revision?: boolean; contract?: boolean } = {},
 ): LaunchPreferenceTarget & { calls: string[] } {
   const calls: string[] = [];
   return {
@@ -59,9 +69,14 @@ function target(
       calls.push(`bank:${preferences.primaryCurrency}:${preferences.telegramId}`);
       return persistence.bank ?? true;
     },
+    synchronizeBank: async () => 'local',
     saveAppliedReceipt: (receipt) => {
       calls.push(`receipt:${receipt.telegramId}:${receipt.revision}`);
       return persistence.revision ?? true;
+    },
+    markClientContract: (telegramId) => {
+      calls.push(`contract:${telegramId}`);
+      return persistence.contract ?? true;
     },
   };
 }
@@ -78,7 +93,188 @@ describe('synchronizeLaunchPreferences', () => {
       'locale:en',
       'bank:GEL:9007199254740993',
       'receipt:9007199254740993:4',
+      'contract:9007199254740993',
     ]);
+  });
+
+  it('adopts a canonical server bank without projecting stale top-level bank preferences', async () => {
+    const bankState = {
+      ...buildSeed(new Date().toISOString()),
+      primaryCurrency: 'USD' as const,
+      profile: { displayName: 'Canonical Ada', telegramId: PREFERENCES.telegramId },
+    };
+    const launch: LaunchState = {
+      ...PREFERENCES,
+      bank: {
+        contractVersion: 1,
+        mode: 'server',
+        telegramId: PREFERENCES.telegramId,
+        revisionEpoch: 'fedcba9876543210fedcba9876543210',
+        revision: 8,
+        digest: 'a'.repeat(64),
+        state: bankState,
+        warnings: [],
+      },
+    };
+    const destination = target();
+    destination.synchronizeBank = vi.fn(async () => 'applied' as const);
+
+    await expect(
+      synchronizeLaunchPreferences(platform(launch), new AbortController().signal, destination),
+    ).resolves.toBe('applied');
+
+    expect(destination.calls).toEqual([
+      'locale:en',
+      'receipt:9007199254740993:4',
+      'contract:9007199254740993',
+    ]);
+    expect(destination.synchronizeBank).toHaveBeenCalledWith(
+      PREFERENCES.telegramId,
+      launch.bank,
+      expect.objectContaining({ isTelegram: true }),
+      expect.any(AbortSignal),
+    );
+  });
+
+  it('quarantines a changed raw-session fingerprint before consulting stale parsed identity', async () => {
+    let fingerprint = 'raw-session-a';
+    const source = platform(PREFERENCES);
+    const getCurrentUser = vi.fn(() => ({
+      displayName: 'Stale Ada',
+      source: 'host' as const,
+      telegramId: PREFERENCES.telegramId,
+    }));
+    source.getCurrentUser = getCurrentUser;
+    source.getSessionFingerprint = () => fingerprint;
+    const destination = target(PREFERENCES.revision);
+    destination.isolateBankSession = vi.fn(async () => false);
+
+    await expect(
+      synchronizeLaunchPreferences(source, new AbortController().signal, destination),
+    ).resolves.toBe('current');
+    expect(destination.isolateBankSession).toHaveBeenLastCalledWith(
+      undefined,
+      expect.any(AbortSignal),
+    );
+    expect(getCurrentUser).not.toHaveBeenCalled();
+
+    vi.mocked(destination.isolateBankSession).mockClear();
+    getCurrentUser.mockClear();
+    fingerprint = 'raw-session-b';
+    source.loadLaunchState = vi.fn(async () => {
+      throw Object.assign(new TypeError('offline'), { retryable: true });
+    });
+
+    await expect(
+      synchronizeLaunchPreferences(source, new AbortController().signal, destination),
+    ).rejects.toMatchObject({ retryable: true });
+    expect(destination.isolateBankSession).toHaveBeenCalledOnce();
+    expect(destination.isolateBankSession).toHaveBeenCalledWith(
+      undefined,
+      expect.any(AbortSignal),
+    );
+    expect(getCurrentUser).not.toHaveBeenCalled();
+  });
+
+  it('quarantines when the raw-session fingerprint rotates during bootstrap', async () => {
+    let fingerprint = 'raw-session-a';
+    const source = platform(PREFERENCES);
+    const getCurrentUser = vi.fn(() => ({
+      displayName: 'Ada',
+      source: 'host' as const,
+      telegramId: PREFERENCES.telegramId,
+    }));
+    source.getCurrentUser = getCurrentUser;
+    source.getSessionFingerprint = () => fingerprint;
+    const destination = target(PREFERENCES.revision);
+    destination.isolateBankSession = vi.fn(async () => true);
+
+    await expect(
+      synchronizeLaunchPreferences(source, new AbortController().signal, destination),
+    ).resolves.toBe('current');
+    vi.mocked(destination.isolateBankSession).mockClear();
+    getCurrentUser.mockClear();
+    source.loadLaunchState = vi.fn(async () => {
+      fingerprint = 'raw-session-b';
+      throw Object.assign(new TypeError('offline'), { retryable: true });
+    });
+
+    await expect(
+      synchronizeLaunchPreferences(source, new AbortController().signal, destination),
+    ).rejects.toMatchObject({ retryable: true });
+    expect(getCurrentUser).toHaveBeenCalledOnce();
+    expect(destination.isolateBankSession).toHaveBeenNthCalledWith(
+      1,
+      PREFERENCES.telegramId,
+      expect.any(AbortSignal),
+    );
+    expect(destination.isolateBankSession).toHaveBeenNthCalledWith(
+      2,
+      undefined,
+      expect.any(AbortSignal),
+    );
+  });
+
+  it('does not let an older rotated-session sync quarantine a newer verified session', async () => {
+    let releaseOlder: (launch: LaunchState) => void = () => undefined;
+    const olderBootstrap = new Promise<LaunchState>((resolve) => {
+      releaseOlder = resolve;
+    });
+    let fingerprint = 'raw-session-a';
+    let bootstrapCall = 0;
+    let visibleTelegramId: string | undefined = 'previous-user';
+    const newerLaunch: LaunchState = {
+      ...PREFERENCES,
+      revision: PREFERENCES.revision + 1,
+      telegramId: '42',
+      displayName: 'Grace Hopper',
+    };
+    const source = platform(PREFERENCES);
+    source.getSessionFingerprint = () => fingerprint;
+    source.loadLaunchState = vi.fn(async () => {
+      bootstrapCall += 1;
+      return bootstrapCall === 1 ? olderBootstrap : newerLaunch;
+    });
+    const destination = target();
+    destination.isolateBankSession = vi.fn(async (telegramId) => {
+      visibleTelegramId = telegramId;
+      return false;
+    });
+    destination.activateVerifiedSession = async (telegramId) => {
+      visibleTelegramId = telegramId;
+      return false;
+    };
+    destination.applyBankPreferences = async (preferences) => {
+      visibleTelegramId = preferences.telegramId;
+      return true;
+    };
+
+    const older = synchronizeLaunchPreferences(
+      source,
+      new AbortController().signal,
+      destination,
+    );
+    await vi.waitFor(() => expect(source.loadLaunchState).toHaveBeenCalledOnce());
+    fingerprint = 'raw-session-b';
+    await expect(
+      synchronizeLaunchPreferences(source, new AbortController().signal, destination),
+    ).resolves.toBe('applied');
+    expect(visibleTelegramId).toBe('42');
+
+    releaseOlder(PREFERENCES);
+    await expect(older).resolves.toBe('retry');
+    expect(visibleTelegramId).toBe('42');
+    expect(destination.isolateBankSession).toHaveBeenCalledTimes(2);
+    expect(destination.isolateBankSession).toHaveBeenNthCalledWith(
+      1,
+      undefined,
+      expect.any(AbortSignal),
+    );
+    expect(destination.isolateBankSession).toHaveBeenNthCalledWith(
+      2,
+      undefined,
+      expect.any(AbortSignal),
+    );
   });
 
   it('restores the same verified namespace without overwriting unchanged in-app choices', async () => {
@@ -95,7 +291,7 @@ describe('synchronizeLaunchPreferences', () => {
       synchronizeLaunchPreferences(source, new AbortController().signal, destination),
     ).resolves.toBe('current');
 
-    expect(destination.calls).toEqual([]);
+    expect(destination.calls).toEqual(['contract:9007199254740993']);
   });
 
   it('leaves the marker retryable when locale or BankState persistence fails', async () => {
@@ -106,6 +302,21 @@ describe('synchronizeLaunchPreferences', () => {
     ).resolves.toBe('retry');
 
     expect(destination.calls).toEqual(['locale:en', 'bank:GEL:9007199254740993']);
+  });
+
+  it('does not report bridge readiness when the client-contract marker cannot persist', async () => {
+    const destination = target(0, { contract: false });
+
+    await expect(
+      synchronizeLaunchPreferences(platform(PREFERENCES), new AbortController().signal, destination),
+    ).resolves.toBe('retry');
+
+    expect(destination.calls).toEqual([
+      'locale:en',
+      'bank:GEL:9007199254740993',
+      'receipt:9007199254740993:4',
+      'contract:9007199254740993',
+    ]);
   });
 
   it('applies a lower revision when it belongs to a different Telegram account', async () => {
@@ -126,6 +337,7 @@ describe('synchronizeLaunchPreferences', () => {
       'locale:en',
       'bank:GEL:9007199254740993',
       'receipt:9007199254740993:4',
+      'contract:9007199254740993',
     ]);
   });
 
@@ -147,6 +359,7 @@ describe('synchronizeLaunchPreferences', () => {
       'locale:en',
       'bank:GEL:9007199254740993',
       'receipt:9007199254740993:4',
+      'contract:9007199254740993',
     ]);
   });
 
@@ -171,9 +384,14 @@ describe('synchronizeLaunchPreferences', () => {
         signal.throwIfAborted();
         return true;
       },
+      synchronizeBank: async () => 'local',
       saveAppliedReceipt: (receipt) => {
         applied = receipt;
         calls.push(`receipt:${receipt.revision}`);
+        return true;
+      },
+      markClientContract: (telegramId) => {
+        calls.push(`contract:${telegramId}`);
         return true;
       },
     };
@@ -194,7 +412,13 @@ describe('synchronizeLaunchPreferences', () => {
     releaseFirst();
 
     await expect(Promise.all([newerSync, olderSync])).resolves.toEqual(['applied', 'current']);
-    expect(calls).toEqual(['locale:5', 'bank:5', 'receipt:5']);
+    expect(calls).toEqual([
+      'locale:5',
+      'bank:5',
+      'receipt:5',
+      'contract:9007199254740993',
+      'contract:9007199254740993',
+    ]);
     expect(applied).toEqual({
       version: 2,
       bankSchemaVersion: SCHEMA_VERSION,
@@ -213,7 +437,7 @@ describe('synchronizeLaunchPreferences', () => {
     };
     const source = platform(PREFERENCES);
     source.getCurrentUser = () => ({ displayName: 'Ada', source: 'demo' });
-    source.loadLaunchPreferences = vi.fn(async () => {
+    source.loadLaunchState = vi.fn(async () => {
       calls.push('fetch');
       return PREFERENCES;
     });
@@ -253,7 +477,7 @@ describe('synchronizeLaunchPreferences', () => {
     ).rejects.toMatchObject({ name: 'AbortError' });
 
     expect(onIdentityIsolated).not.toHaveBeenCalled();
-    expect(source.loadLaunchPreferences).not.toHaveBeenCalled();
+    expect(source.loadLaunchState).not.toHaveBeenCalled();
   });
 
   it('quarantines an unavailable identity before a retryable network failure', async () => {
@@ -265,7 +489,7 @@ describe('synchronizeLaunchPreferences', () => {
     };
     const source = platform(PREFERENCES);
     source.getCurrentUser = () => ({ displayName: 'Ada', source: 'demo' });
-    source.loadLaunchPreferences = vi.fn(async () => {
+    source.loadLaunchState = vi.fn(async () => {
       calls.push('fetch');
       throw Object.assign(new TypeError('offline'), { retryable: true });
     });
@@ -303,6 +527,7 @@ describe('synchronizeLaunchPreferences', () => {
       'locale:en',
       'bank:GEL:9007199254740993',
       'receipt:9007199254740993:4',
+      'contract:9007199254740993',
     ]);
   });
 
@@ -317,7 +542,7 @@ describe('synchronizeLaunchPreferences', () => {
       source: host.telegramId === undefined ? 'demo' : 'host',
       ...(host.telegramId === undefined ? {} : { telegramId: host.telegramId }),
     });
-    source.loadLaunchPreferences = vi.fn(async () => {
+    source.loadLaunchState = vi.fn(async () => {
       attempts += 1;
       if (attempts === 1) {
         throw Object.assign(new TypeError('offline'), { retryable: true });
@@ -351,7 +576,12 @@ describe('synchronizeLaunchPreferences', () => {
         calls.push(`apply:${preferences.telegramId}`);
         return true;
       },
+      synchronizeBank: async () => 'local',
       saveAppliedReceipt: () => true,
+      markClientContract: (telegramId) => {
+        calls.push(`contract:${telegramId}`);
+        return true;
+      },
     };
 
     await expect(
@@ -365,14 +595,18 @@ describe('synchronizeLaunchPreferences', () => {
     ).resolves.toBe('applied');
 
     expect(visibleTelegramId).toBe(PREFERENCES.telegramId);
-    expect(calls).toEqual(['quarantine:41', `apply:${PREFERENCES.telegramId}`]);
+    expect(calls).toEqual([
+      'quarantine:41',
+      `apply:${PREFERENCES.telegramId}`,
+      `contract:${PREFERENCES.telegramId}`,
+    ]);
   });
 
   it('does not write preferences after cancellation', async () => {
     const controller = new AbortController();
     const destination = target();
     const delayedPlatform = platform(PREFERENCES);
-    delayedPlatform.loadLaunchPreferences = vi.fn(async () => {
+    delayedPlatform.loadLaunchState = vi.fn(async () => {
       controller.abort();
       return PREFERENCES;
     });
@@ -402,8 +636,13 @@ describe('synchronizeLaunchPreferences', () => {
         if (preferences.revision === 5) await firstBankWrite;
         return true;
       },
+      synchronizeBank: async () => 'local',
       saveAppliedReceipt: (receipt) => {
         calls.push(`receipt:${receipt.revision}`);
+        return true;
+      },
+      markClientContract: (telegramId) => {
+        calls.push(`contract:${telegramId}`);
         return true;
       },
     };

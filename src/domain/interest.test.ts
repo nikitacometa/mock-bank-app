@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { accruedInterest, applySettleAccount, epochDayUTC } from './interest';
+import {
+  accruedInterest,
+  applySettleAccount,
+  applySettleAllWithinTransactionLimit,
+  epochDayUTC,
+} from './interest';
 import { buildSeed, SAVINGS_ID, SAVINGS_APY } from './seed';
 import { balanceOf, transactionsOf } from './ledger';
 import { rub } from './money';
 
 const NOW = '2026-09-01T12:00:00.000Z';
+const CREATED_AT = '2026-09-02T12:00:00.000Z';
+const SETTLED_AT = '2026-09-05T12:00:00.000Z';
 
 describe('epochDayUTC', () => {
   it('same UTC day regardless of time', () => {
@@ -62,5 +69,44 @@ describe('applySettleAccount', () => {
     const rewound = applySettleAccount(state, SAVINGS_ID, '2026-07-01T09:00:00.000Z');
     expect(balanceOf(rewound, SAVINGS_ID)).toBe(balance);
     expect(rewound.transactions.length).toBe(state.transactions.length);
+  });
+});
+
+describe('bounded interest settlement', () => {
+  it('keeps every accrual anchor unchanged when the complete interest batch exceeds transaction capacity', () => {
+    const seed = buildSeed(CREATED_AT);
+    const state = {
+      ...seed,
+      accounts: seed.accounts.map((account) =>
+        account.id === 'acc_usd'
+          ? {
+              ...account,
+              type: 'savings' as const,
+              apy: 0.04,
+              accrualAnchor: CREATED_AT,
+            }
+          : account,
+      ),
+    };
+    const anchorsBefore = state.accounts
+      .filter((account) => account.type === 'savings')
+      .map((account) => [account.id, account.accrualAnchor]);
+
+    const outcome = applySettleAllWithinTransactionLimit(
+      state,
+      SETTLED_AT,
+      state.transactions.length + 1,
+    );
+
+    expect(outcome).toEqual({
+      state,
+      applied: false,
+      capacityReached: true,
+    });
+    expect(outcome.state).toBe(state);
+    expect(outcome.state.accounts
+      .filter((account) => account.type === 'savings')
+      .map((account) => [account.id, account.accrualAnchor])).toEqual(anchorsBefore);
+    expect(outcome.state.transactions).toBe(state.transactions);
   });
 });

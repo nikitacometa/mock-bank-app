@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { categoryLabel, fmtDay, fmtRateDate, fmtTime, localizeDemoText } from './format';
+import { buildSeed } from '@/domain/seed';
+import type { Transaction } from '@/domain/types';
+import {
+  accountDisplayName,
+  buildOwnTransferCounterpartIndex,
+  categoryLabel,
+  fmtDay,
+  fmtRateDate,
+  fmtTime,
+  fmtTransactionDay,
+  localizeDemoText,
+  shouldShowTransactionTime,
+  transactionCounterpartyDisplayName,
+  transactionDayKey,
+} from './format';
 
 describe('localized UI formatting', () => {
   it('formats relative and calendar days in both interface languages', () => {
@@ -14,6 +28,24 @@ describe('localized UI formatting', () => {
     expect(fmtRateDate('2026-09-01', 'ru')).toContain('1');
     expect(fmtRateDate('2026-09-01', 'en')).toBe('Sep 1');
     expect(fmtRateDate('2026-09-01', 'en', 'full')).toBe('09/01/2026');
+  });
+
+  it('groups and formats a backfilled transaction by its explicit UTC banking date', () => {
+    const transaction = {
+      id: 'tx_backfill',
+      accountId: 'acc_checking',
+      seq: 1,
+      amountMinor: -100,
+      balanceAfterMinor: 900,
+      kind: 'manual_expense',
+      effectiveDate: '2026-08-31',
+      createdAt: '2026-09-05T23:59:00.000Z',
+    } satisfies Transaction;
+    const now = new Date('2026-09-05T00:15:00.000Z');
+
+    expect(transactionDayKey(transaction)).toBe('2026-08-31');
+    expect(fmtTransactionDay(transaction, 'en', now)).toBe('August 31');
+    expect(fmtTransactionDay(transaction, 'ru', now)).toBe('31 августа');
   });
 
   it('uses calendar-day arithmetic across daylight-saving transitions', () => {
@@ -60,5 +92,118 @@ describe('localized UI formatting', () => {
     expect(localizeDemoText('Custom Merchant', 'en')).toBe('Custom Merchant');
     expect(localizeDemoText('constructor', 'en')).toBe('constructor');
     expect(localizeDemoText('Городское такси', 'ru')).toBe('Городское такси');
+    expect(localizeDemoText('Current', 'ru')).toBe('Текущий');
+    expect(localizeDemoText('External account top up', 'ru')).toBe(
+      'Пополнение с внешнего счёта',
+    );
+    expect(localizeDemoText('Custom Merchant', 'ru')).toBe('Custom Merchant');
+  });
+
+  it('uses account roles for fixture labels and localizes only the generated custom template', () => {
+    const state = buildSeed('2026-09-02T00:00:00.000Z', 'GEL');
+    const checking = state.accounts.find((account) => account.role === 'primary-checking');
+    const companion = state.accounts.find((account) => account.role === 'companion-1');
+    if (checking === undefined || companion === undefined) throw new Error('fixture is incomplete');
+
+    expect(accountDisplayName(checking, 'ru')).toBe('Текущий');
+    expect(accountDisplayName(companion, 'en')).not.toBe(companion.currency);
+    expect(accountDisplayName({ ...companion, role: 'custom', currency: 'GEL', name: 'Everyday GEL' }, 'ru'))
+      .toBe('Повседневный');
+    expect(accountDisplayName({ ...companion, role: 'custom', name: 'My GEL' }, 'ru'))
+      .toBe('My GEL');
+    expect(accountDisplayName({ ...companion, role: 'custom', name: 'Current' }, 'ru'))
+      .toBe('Current');
+    expect(accountDisplayName({ ...companion, role: 'custom', name: 'Текущий' }, 'en'))
+      .toBe('Текущий');
+  });
+
+  it('localizes fixture counterparties but preserves colliding manual text exactly', () => {
+    const fixture = {
+      id: 'tx_fixture',
+      accountId: 'acc_checking',
+      seq: 1,
+      amountMinor: -100,
+      balanceAfterMinor: 900,
+      kind: 'purchase',
+      counterparty: 'Апа',
+      createdAt: '2026-09-05T12:00:00.000Z',
+    } satisfies Transaction;
+
+    expect(transactionCounterpartyDisplayName(fixture, 'en')).toBe('Mum');
+    expect(
+      transactionCounterpartyDisplayName({ ...fixture, kind: 'manual_expense' }, 'en'),
+    ).toBe('Апа');
+    expect(
+      transactionCounterpartyDisplayName(
+        { ...fixture, kind: 'manual_income', counterparty: 'Current' },
+        'ru',
+      ),
+    ).toBe('Current');
+  });
+
+  it('uses the counterpart account role for own-transfer names', () => {
+    const state = buildSeed('2026-09-02T00:00:00.000Z', 'USD');
+    const source = state.accounts[0];
+    const target = { ...state.accounts[1], role: 'custom' as const, name: 'Current' };
+    const outgoing = {
+      id: 'tx_custom_account_out',
+      accountId: source.id,
+      seq: 1,
+      amountMinor: -100,
+      balanceAfterMinor: 900,
+      kind: 'transfer_own_out' as const,
+      counterparty: target.name,
+      category: 'transfer',
+      transferGroupId: 'grp_custom_account',
+      createdAt: '2026-09-05T12:00:00.000Z',
+    };
+    const incoming = {
+      ...outgoing,
+      id: 'tx_custom_account_in',
+      accountId: target.id,
+      seq: 2,
+      amountMinor: 100,
+      balanceAfterMinor: 1_100,
+      kind: 'transfer_own_in' as const,
+      counterparty: source.name,
+    };
+    const index = buildOwnTransferCounterpartIndex(
+      [source, target],
+      [outgoing, incoming],
+    );
+
+    expect(index.get(outgoing.id)?.id).toBe(target.id);
+    expect(index.get(incoming.id)?.id).toBe(source.id);
+    expect(
+      transactionCounterpartyDisplayName(outgoing, 'ru', index),
+    ).toBe('Current');
+    const localizedTarget = { ...target, name: 'Текущий' };
+    const localizedIndex = buildOwnTransferCounterpartIndex(
+      [source, localizedTarget],
+      [outgoing, incoming],
+    );
+    expect(
+      transactionCounterpartyDisplayName(
+        { ...outgoing, counterparty: 'Текущий' },
+        'en',
+        localizedIndex,
+      ),
+    ).toBe('Текущий');
+  });
+
+  it('shows occurrence time unless an entry was appended on another UTC banking date', () => {
+    const transaction = {
+      id: 'tx_time',
+      accountId: 'acc_checking',
+      seq: 1,
+      amountMinor: -100,
+      balanceAfterMinor: 900,
+      kind: 'manual_expense',
+      effectiveDate: '2026-09-05',
+      createdAt: '2026-09-05T23:47:00.000Z',
+    } satisfies Transaction;
+
+    expect(shouldShowTransactionTime(transaction)).toBe(true);
+    expect(shouldShowTransactionTime({ ...transaction, effectiveDate: '2026-08-19' })).toBe(false);
   });
 });

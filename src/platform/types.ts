@@ -1,4 +1,6 @@
-import type { Currency } from '@/domain/types';
+import type { BankCommand, BankCommandOutcome } from '@/domain/bankCommands';
+import type { RecurringWarning } from '@/domain/recurring';
+import type { BankState, Currency } from '@/domain/types';
 import type { AppLocale } from '@/i18n/catalog';
 
 /**
@@ -35,14 +37,85 @@ export interface LaunchPreferences {
   readonly telegramId: string;
 }
 
+export type ServerBankWarning = RecurringWarning;
+
+export interface ServerBankRevision {
+  readonly telegramId: string;
+  readonly revisionEpoch: string;
+  readonly revision: number;
+  readonly digest: string;
+  readonly state: BankState;
+  readonly warnings: readonly ServerBankWarning[];
+}
+
+export type LaunchBankState =
+  | {
+      readonly contractVersion: 1;
+      readonly mode: 'import_required';
+      readonly telegramId: string;
+    }
+  | ({
+      readonly contractVersion: 1;
+      readonly mode: 'server';
+    } & ServerBankRevision);
+
+export interface LaunchState extends LaunchPreferences {
+  readonly bank?: LaunchBankState;
+}
+
+export interface BankImportRequest {
+  readonly version: 1;
+  readonly importId: string;
+  readonly stateVersion: 4 | 5;
+  readonly state: BankState;
+}
+
+export interface BankImportResponse extends ServerBankRevision {
+  readonly version: 1;
+  readonly mode: 'server';
+  readonly imported: boolean;
+}
+
+export type SuccessfulBankCommandOutcome = Extract<BankCommandOutcome, { readonly ok: true }>;
+
+export interface BankCommandResponse extends ServerBankRevision {
+  readonly version: 1;
+  readonly applied: boolean;
+  readonly replayed: boolean;
+  readonly outcome: SuccessfulBankCommandOutcome;
+}
+
+export interface BankRatesRefreshResponse extends ServerBankRevision {
+  readonly version: 1;
+  readonly updated: boolean;
+}
+
 export interface PlatformAdapter {
   isTelegram: boolean;
   getCurrentUser(): PlatformUser;
   /**
+   * Opaque in-memory identity for the currently observed host session. The
+   * value must not contain raw init data and must never be persisted.
+   */
+  getSessionFingerprint?(): string | undefined;
+  /**
    * Loads preferences bound to validated Telegram init data. Web returns null;
    * raw init data stays inside the platform adapter and is never persisted.
    */
-  loadLaunchPreferences(signal?: AbortSignal): Promise<LaunchPreferences | null>;
+  loadLaunchState(signal?: AbortSignal): Promise<LaunchState | null>;
+  /** Authenticated create-if-absent migration from this Telegram user's local snapshot. */
+  importBankState(request: BankImportRequest, signal?: AbortSignal): Promise<BankImportResponse>;
+  /** Executes one typed mutation against this Telegram user's canonical server ledger. */
+  executeBankCommand(
+    command: BankCommand,
+    clientMutationId: string,
+    signal?: AbortSignal,
+  ): Promise<BankCommandResponse>;
+  /** Refreshes canonical reference rates through the authenticated server authority. */
+  refreshBankRates(
+    clientMutationId: string,
+    signal?: AbortSignal,
+  ): Promise<BankRatesRefreshResponse>;
   haptic(kind: HapticKind): void;
   copyText(text: string): Promise<boolean>;
   /**

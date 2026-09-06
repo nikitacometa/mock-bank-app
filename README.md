@@ -14,7 +14,8 @@ to a bank or moving real money.
 
 ## Inside the demo
 
-- Four accounts: KZT spending, KZT savings, USD, and EUR
+- Eight authentic currency fixtures with comparable USD economics
+- Four starting accounts, plus reversible account creation, closing, and restoration
 - Portfolio totals in KZT, THB, VND, RUB, USD, EUR, IDR, or GEL
 - A dedicated USD equivalent for every active non-USD account
 - Daily reference rates with a deterministic offline fallback
@@ -23,17 +24,22 @@ to a bank or moving real money.
 - Searchable history, pending operations, and custom merchant artwork
 - Mock Visa and Mastercard cards with freeze controls
 - Calendar-based savings interest recorded directly in the ledger
+- Manual income, expenses, and monthly recurring entries on checking accounts, with UTC backfill
+- No-overdraft checks and savings corrections applied after interest settlement
 - A complete Russian and English interface
 
 ## Telegram Mini App
 
-The companion bot guides each user through language, primary currency, and optional display-name
-setup before opening Cometa.
+The next release candidate turns the companion bot into a compact command center for the demo:
+record an income or expense, backfill a monthly subscription, inspect recurring entries, or manage
+accounts without leaving the chat. The live bot still uses the accepted device-local baseline until
+the guarded two-release rollout and real-profile acceptance are complete.
 
-Telegram launch data is verified by the backend. Preferences are bootstrapped into the Mini App,
-while accounts, balances, cards, and transaction history stay on the device and remain isolated per
-Telegram account. Native Main Button, Back Button, viewport, theme, and haptic behavior live behind
-the same platform contract used by the web app.
+In the candidate, Telegram launch data is verified by the backend. The first authenticated device
+snapshot becomes canonical; after activation, bot and Mini App commands share one
+server-authoritative mock ledger isolated by Telegram ID. A different pre-authority copy on another
+device is never uploaded or replaced silently. Native Main Button, Back Button, viewport, theme, and
+haptic behavior remain behind the same platform contract used by the web app.
 
 <p align="center">
   <img src="docs/assets/showcase/telegram-onboarding.png" alt="Sanitized illustration of the Cometa Telegram onboarding flow" width="390">
@@ -61,19 +67,25 @@ the same platform contract used by the web app.
 
 ```text
 React application
-├── domain       integer money, ledger, FX, interest, transfers
-├── store        Zustand state and cross-tab-safe persistence
-├── platform     interchangeable web and Telegram adapters
+├── domain       integer money, ledger, FX, recurrence, account lifecycle
+├── store        local web state and guarded Telegram authority sync
+├── platform     interchangeable web and signed Telegram adapters
 ├── interface    mobile-first screens, sheets, and custom visuals
-└── bot          Node.js, SQLite, onboarding, signed bootstrap
+└── bot          Node.js, SQLite, chat flows, signed bank commands
 ```
 
 Balances are derived from the transaction ledger instead of stored twice. Money uses integer minor
 units, completed FX transfers retain their exact rate snapshot, and client transfer IDs make retries
 idempotent. Web Locks serialize cross-tab mutations before persistence.
 
-The browser and Telegram environments meet through a narrow platform seam. The bot database stores
-identity and interface preferences, never the mock banking ledger.
+The browser and Telegram environments meet through a narrow platform seam. Web data stays local.
+After the guarded authority switch, Telegram stores a revisioned mock snapshot and a bounded
+idempotency window per authenticated profile. Balances are never written as independent account
+fields.
+
+The live SQLite database and its release-time backups currently share one VPS. Losing Irena in full
+can therefore lose Telegram demo changes; encrypted offsite backup and a restore drill are the next
+infrastructure milestone, not a capability claimed by this demo.
 
 Vite · React 19 · TypeScript 6 · Tailwind CSS v4 · Zustand · Radix Dialog · `@tma.js/sdk-react` ·
 Node.js 22 · SQLite · Vitest
@@ -83,10 +95,12 @@ Node.js 22 · SQLite · Vitest
 Cometa is an interactive mock. It has no real money, payment rails, bank connections, KYC, or
 financial services.
 
-The client ships with 437 deterministic demo transactions. Part of the fixture comes from a
+The KZT fixture ships with 437 deterministic demo transactions after initial interest settlement.
+Part of the fixture comes from a
 sanitized personal statement: names, account details, card details, statement identifiers, and
 booking references were removed, while exact dates, merchants, and amounts remain fingerprintable.
-Keep this repository private unless that fixture is replaced with a shifted or synthetic dataset.
+This public repository therefore contains a deliberately disclosed, fingerprintable dataset; it
+must not be described as anonymous. The seven non-KZT fixtures are fully synthetic.
 
 ## Run locally
 
@@ -105,5 +119,12 @@ Bot and VPS setup use separate secret-safe runbooks:
 
 ## Status
 
-The web experience and signed Telegram Desktop WebView flow are verified. Acceptance in current
-Telegram clients on iOS and Android remains open.
+The web and existing Mini App baseline are live and unchanged. The eight-fixture ledger, per-profile
+Telegram authority, and RU/EN transaction, recurrence, and account flows are implemented in the
+next release candidate. Its product behavior passed the last integrated test snapshot; the final
+Docker/Caddy perimeter changes still need the complete gate and immutable review.
+
+Deployment remains pending. The controlled rollout installs the local-only Docker daemon perimeter,
+hardens the Caddy edge, prepares and activates two rollback-compatible releases while authority stays
+local, and only then enables the one-way server ledger. Real two-profile journeys, three sanitized
+production chat captures, and current Android/iOS WebView acceptance remain open.

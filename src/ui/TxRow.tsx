@@ -2,22 +2,34 @@ import { memo } from 'react';
 import type { Currency, Transaction } from '@/domain/types';
 import { formatSigned } from '@/domain/money';
 import { useI18n } from '@/i18n';
-import { categoryLabel, fmtTime, localizeDemoText } from './format';
+import {
+  categoryLabel,
+  fmtTime,
+  type OwnTransferCounterpartIndex,
+  shouldShowTransactionTime,
+  transactionCounterpartyDisplayName,
+} from './format';
 import { MerchantAvatar } from './MerchantAvatar';
 
 function TxRowComponent({
   tx,
   currency,
+  ownTransferCounterparts,
   onClick,
 }: {
   tx: Transaction;
   currency: Currency;
+  ownTransferCounterparts?: OwnTransferCounterpartIndex;
   onClick?: () => void;
 }) {
   const { locale, t } = useI18n();
   const income = tx.amountMinor > 0;
   const ownTransfer = tx.kind === 'transfer_own_out' || tx.kind === 'transfer_own_in';
-  const counterparty = localizeDemoText(tx.counterparty, locale);
+  const counterparty = transactionCounterpartyDisplayName(
+    tx,
+    locale,
+    ownTransferCounterparts,
+  );
   const title = ownTransfer
     ? t(tx.kind === 'transfer_own_out' ? 'transaction.transferTo' : 'transaction.transferFrom', {
         name: counterparty,
@@ -31,6 +43,7 @@ function TxRowComponent({
         })
       : t('transaction.betweenAccounts')
     : categoryLabel(tx.category, locale);
+  const detail = tx.note === undefined ? label : `${label} · ${tx.note}`;
   const content = (
     <>
       <MerchantAvatar
@@ -47,8 +60,12 @@ function TxRowComponent({
             </span>
           ) : null}
         </span>
-        <span className="mt-0.5 block text-[0.8125rem] text-ink-3">
-          {label} · {fmtTime(tx.createdAt, locale)}
+        <span
+          className="mt-0.5 block truncate text-[0.8125rem] text-ink-3"
+          title={detail}
+        >
+          <bdi dir="auto">{detail}</bdi>
+          {shouldShowTransactionTime(tx) ? ` · ${fmtTime(tx.createdAt, locale)}` : ''}
         </span>
       </span>
       <span className={`num text-[0.9375rem] ${income ? 'text-mint' : 'text-ink'}`}>

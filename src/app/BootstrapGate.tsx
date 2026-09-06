@@ -3,6 +3,7 @@ import { translate } from '@/i18n/catalog';
 import { usePlatform } from '@/platform/usePlatform';
 import type { PlatformAdapter } from '@/platform/types';
 import { useUiStore } from '@/store/uiStore';
+import { useBankStore } from '@/store/bankStore';
 import { CometMark } from '@/ui/icons';
 import { APP_NAME } from './config';
 import { synchronizeLaunchPreferences } from './launchPreferences';
@@ -234,7 +235,11 @@ export function startTelegramPreferenceBootstrap({
 export function BootstrapGate({ children }: { children: ReactNode }) {
   const platform = usePlatform();
   const [ready, setReady] = useState(!platform.isTelegram);
+  const [manualRetry, setManualRetry] = useState(0);
   const locale = useUiStore((state) => state.locale);
+  const ledgerMode = useBankStore((state) => state.ledgerMode);
+  const ledgerSyncError = useBankStore((state) => state.ledgerSyncError);
+  const approveServerCopy = useBankStore((state) => state.approveServerCopy);
 
   useEffect(() => {
     if (!platform.isTelegram) return;
@@ -242,9 +247,62 @@ export function BootstrapGate({ children }: { children: ReactNode }) {
       platform,
       onReady: () => setReady(true),
     });
-  }, [platform]);
+  }, [manualRetry, platform]);
 
-  if (ready) return children;
+  if (ready && ledgerMode !== 'read_only') return children;
+
+  if (ready) {
+    const needsServerCopyConfirmation =
+      ledgerSyncError === 'server_copy_confirmation_required';
+    return (
+      <div
+        className="flex min-h-[var(--app-height)] items-center justify-center bg-bg px-6 text-ink"
+        role="status"
+        aria-live="polite"
+      >
+        <div className="max-w-72 text-center">
+          <div className="mx-auto flex size-16 items-center justify-center rounded-full border border-line bg-surface">
+            <CometMark size={30} className="text-ivory" />
+          </div>
+          <h1 className="mt-5 text-[1.25rem] font-semibold tracking-tight">
+            {needsServerCopyConfirmation
+              ? locale === 'ru'
+                ? 'На сервере уже есть ваше демо'
+                : 'Your server demo is already active'
+              : locale === 'ru'
+                ? 'Счета пока только для чтения'
+                : 'Accounts are read-only for now'}
+          </h1>
+          <p className="mt-2 text-[0.875rem] leading-relaxed text-ink-3">
+            {needsServerCopyConfirmation
+              ? locale === 'ru'
+                ? 'Первая загруженная версия стала основной. Локальная история этого устройства не объединяется и останется без изменений, пока вы не выберете серверную копию.'
+                : 'The first imported version is canonical. This device’s local history will not be merged or changed until you choose the server copy.'
+              : locale === 'ru'
+                ? 'Не удалось свериться с Cometa. Данные не изменятся, пока связь не восстановится.'
+                : 'Cometa could not sync safely. Nothing will change until the connection is restored.'}
+          </p>
+          <button
+            type="button"
+            className="mt-6 min-h-11 rounded-full bg-ivory px-5 text-[0.875rem] font-semibold text-bg"
+            onClick={() => {
+              if (needsServerCopyConfirmation && !approveServerCopy()) return;
+              setReady(false);
+              setManualRetry((value) => value + 1);
+            }}
+          >
+            {needsServerCopyConfirmation
+              ? locale === 'ru'
+                ? 'Использовать серверную копию'
+                : 'Use server copy'
+              : locale === 'ru'
+                ? 'Повторить'
+                : 'Try again'}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

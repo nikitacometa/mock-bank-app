@@ -1,10 +1,15 @@
-import { SUPPORTED_CURRENCIES } from '@/domain/currency';
-import type { Currency, ExchangeRateSnapshot } from '@/domain/types';
+import { SUPPORTED_CURRENCIES } from '../domain/currency';
+import type { Currency, ExchangeRateSnapshot } from '../domain/types';
 
 export const FRANKFURTER_RATES_URL =
   'https://api.frankfurter.dev/v2/rates?base=USD&quotes=EUR,RUB,KZT,THB,VND,IDR,GEL';
 
 export const DEFAULT_EXCHANGE_RATE_TIMEOUT_MS = 8_000;
+export const EXCHANGE_RATE_CACHE_MS = 12 * 60 * 60 * 1_000;
+export const EXCHANGE_RATE_RETRY_COOLDOWN_MS = 30_000;
+export const MAX_EXCHANGE_RATE_RESPONSE_BYTES = 256 * 1_024;
+export const MAX_EXCHANGE_RATE_ROWS = 64;
+const MAX_FUTURE_CLOCK_SKEW_MS = 5 * 60 * 1_000;
 
 export type ExchangeRateServiceErrorCode =
   | 'http'
@@ -29,7 +34,7 @@ export class ExchangeRateServiceError extends Error {
 }
 
 export type ExchangeRateFetch = (
-  input: RequestInfo | URL,
+  input: string | URL | Request,
   init?: RequestInit,
 ) => Promise<Response>;
 
@@ -38,6 +43,8 @@ export interface FetchExchangeRatesOptions {
   readonly now?: () => Date;
   readonly timeoutMs?: number;
 }
+
+export type ExchangeRateSnapshotLoader = () => Promise<ExchangeRateSnapshot>;
 
 type QuoteCurrency = Exclude<Currency, 'USD'>;
 
@@ -99,6 +106,130 @@ export function isRateSnapshotDateCoherent(asOf: string, fetchedAt: string): boo
   return lagDays !== null && lagDays >= 0 && lagDays <= MAX_PROVIDER_LAG_DAYS;
 }
 
+/**
+ * Decide whether a validated live quote may replace the current snapshot.
+ * Observation date wins over request completion time, so a delayed response
+ * can never roll a canonical ledger back to an older market day.
+ */
+export function shouldAdoptExchangeRateSnapshot(
+  current: ExchangeRateSnapshot,
+  candidate: ExchangeRateSnapshot,
+  nowMs = Date.now(),
+): boolean {
+  if (candidate.source !== 'frankfurter') return false;
+  const candidateFetchedAt = Date.parse(candidate.fetchedAt);
+  if (
+    !Number.isFinite(candidateFetchedAt) ||
+    !isRateSnapshotDateCoherent(candidate.asOf, candidate.fetchedAt) ||
+    candidateFetchedAt > nowMs + MAX_FUTURE_CLOCK_SKEW_MS
+  ) {
+    return false;
+  }
+  if (current.source !== 'frankfurter') return true;
+
+  const currentFetchedAt = Date.parse(current.fetchedAt);
+  if (
+    !Number.isFinite(currentFetchedAt) ||
+    !isRateSnapshotDateCoherent(current.asOf, current.fetchedAt) ||
+    currentFetchedAt > nowMs + MAX_FUTURE_CLOCK_SKEW_MS
+  ) {
+    return true;
+  }
+  if (candidate.asOf !== current.asOf) return candidate.asOf > current.asOf;
+  return candidateFetchedAt > currentFetchedAt;
+}
+
+function isProviderCacheFresh(snapshot: ExchangeRateSnapshot, nowMs: number): boolean {
+  const fetchedAt = Date.parse(snapshot.fetchedAt);
+  const age = nowMs - fetchedAt;
+  return (
+    snapshot.source === 'frankfurter' &&
+    Number.isFinite(fetchedAt) &&
+    isRateSnapshotDateCoherent(snapshot.asOf, snapshot.fetchedAt) &&
+    age >= -MAX_FUTURE_CLOCK_SKEW_MS &&
+    age < EXCHANGE_RATE_CACHE_MS
+  );
+}
+
+/**
+ * Process-wide provider cache for the server authority. It shares one bounded
+ * request across users and callers while still rejecting provider failures.
+ */
+export class CachedExchangeRateProvider {
+  readonly #load: ExchangeRateSnapshotLoader;
+  readonly #nowMs: () => number;
+  #cached: ExchangeRateSnapshot | null = null;
+  #inFlight: Promise<ExchangeRateSnapshot> | null = null;
+  #retryNotBeforeMs = 0;
+  #cooldownResult:
+    | { readonly kind: 'error'; readonly error: unknown }
+    | { readonly kind: 'snapshot'; readonly snapshot: ExchangeRateSnapshot }
+    | null = null;
+
+  constructor(
+    load: ExchangeRateSnapshotLoader = () => fetchExchangeRates(),
+    nowMs: () => number = Date.now,
+  ) {
+    this.#load = load;
+    this.#nowMs = nowMs;
+  }
+
+  get(): Promise<ExchangeRateSnapshot> {
+    const nowMs = this.#nowMs();
+    if (!Number.isSafeInteger(nowMs)) {
+      return Promise.reject(new TypeError('Invalid exchange-rate provider clock'));
+    }
+    if (this.#cached !== null && isProviderCacheFresh(this.#cached, nowMs)) {
+      return Promise.resolve(this.#cached);
+    }
+    if (this.#inFlight !== null) return this.#inFlight;
+    if (nowMs < this.#retryNotBeforeMs && this.#cooldownResult !== null) {
+      return this.#cooldownResult.kind === 'snapshot'
+        ? Promise.resolve(this.#cooldownResult.snapshot)
+        : Promise.reject(this.#cooldownResult.error);
+    }
+
+    const request = this.#load().then(
+      (candidate) => {
+        const evaluatedAtMs = this.#nowMs();
+        if (!Number.isSafeInteger(evaluatedAtMs)) {
+          throw new TypeError('Invalid exchange-rate provider clock');
+        }
+
+        const cached = this.#cached;
+        if (
+          cached !== null &&
+          !shouldAdoptExchangeRateSnapshot(cached, candidate, evaluatedAtMs)
+        ) {
+          this.#retryNotBeforeMs = evaluatedAtMs + EXCHANGE_RATE_RETRY_COOLDOWN_MS;
+          this.#cooldownResult = { kind: 'snapshot', snapshot: cached };
+          return cached;
+        }
+
+        this.#cached = candidate;
+        this.#retryNotBeforeMs = 0;
+        this.#cooldownResult = null;
+        return candidate;
+      },
+      (error: unknown) => {
+        const failedAtMs = this.#nowMs();
+        if (!Number.isSafeInteger(failedAtMs)) {
+          throw new TypeError('Invalid exchange-rate provider clock', { cause: error });
+        }
+        this.#retryNotBeforeMs = failedAtMs + EXCHANGE_RATE_RETRY_COOLDOWN_MS;
+        this.#cooldownResult = { kind: 'error', error };
+        throw error;
+      },
+    );
+    this.#inFlight = request;
+    const clearIfCurrent = (): void => {
+      if (this.#inFlight === request) this.#inFlight = null;
+    };
+    void request.then(clearIfCurrent, clearIfCurrent);
+    return request;
+  }
+}
+
 function parseRate(value: unknown, quote: QuoteCurrency): string {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
     throw invalidPayload(`Frankfurter returned an invalid ${quote} rate`);
@@ -119,6 +250,11 @@ function parseSnapshot(
 ): ExchangeRateSnapshot {
   if (!Array.isArray(payload)) {
     throw invalidPayload('Frankfurter payload must be an array');
+  }
+  if (payload.length > MAX_EXCHANGE_RATE_ROWS) {
+    throw invalidPayload(
+      `Frankfurter payload exceeds the ${MAX_EXCHANGE_RATE_ROWS}-row limit`,
+    );
   }
 
   const ratesByDate = new Map<string, Map<QuoteCurrency, string>>();
@@ -199,6 +335,86 @@ function validateTimeout(timeoutMs: number): void {
   }
 }
 
+function declaredResponseBytes(response: Response): number | null {
+  const header = response.headers.get('content-length');
+  if (header === null) return null;
+  if (!/^\d+$/.test(header)) {
+    throw invalidPayload('Frankfurter returned an invalid Content-Length header');
+  }
+
+  const bytes = Number(header);
+  if (!Number.isSafeInteger(bytes)) {
+    throw invalidPayload('Frankfurter returned an invalid Content-Length header');
+  }
+  return bytes;
+}
+
+async function readBoundedJson(response: Response, signal: AbortSignal): Promise<unknown> {
+  const declaredBytes = declaredResponseBytes(response);
+  if (declaredBytes !== null && declaredBytes > MAX_EXCHANGE_RATE_RESPONSE_BYTES) {
+    throw invalidPayload(
+      `Frankfurter response exceeds the ${MAX_EXCHANGE_RATE_RESPONSE_BYTES}-byte limit`,
+    );
+  }
+  if (response.body === null) {
+    throw invalidPayload('Frankfurter response has no body');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  let rejectOnAbort: ((reason: unknown) => void) | undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    rejectOnAbort = reject;
+  });
+  let abortHandled = false;
+  const cancelOnAbort = (): void => {
+    if (abortHandled) return;
+    abortHandled = true;
+    const reason = signal.reason ?? new DOMException('Aborted', 'AbortError');
+    void reader.cancel(reason).then(
+      () => rejectOnAbort?.(reason),
+      (cancelError: unknown) => rejectOnAbort?.(cancelError),
+    );
+  };
+  signal.addEventListener('abort', cancelOnAbort, { once: true });
+  if (signal.aborted) cancelOnAbort();
+  let decodedBytes = 0;
+  let jsonText = '';
+
+  try {
+    for (;;) {
+      const chunk = await Promise.race([reader.read(), aborted]);
+      if (chunk.done) break;
+      if (decodedBytes > MAX_EXCHANGE_RATE_RESPONSE_BYTES - chunk.value.byteLength) {
+        const error = invalidPayload(
+          `Frankfurter response exceeds the ${MAX_EXCHANGE_RATE_RESPONSE_BYTES}-byte limit`,
+        );
+        try {
+          await reader.cancel(error);
+        } catch (cancelError: unknown) {
+          throw invalidPayload(error.message, cancelError);
+        }
+        throw error;
+      }
+      decodedBytes += chunk.value.byteLength;
+      jsonText += decoder.decode(chunk.value, { stream: true });
+    }
+    jsonText += decoder.decode();
+  } catch (error: unknown) {
+    if (error instanceof ExchangeRateServiceError) throw error;
+    throw invalidPayload('Frankfurter response body could not be decoded', error);
+  } finally {
+    signal.removeEventListener('abort', cancelOnAbort);
+    reader.releaseLock();
+  }
+
+  try {
+    return JSON.parse(jsonText) as unknown;
+  } catch (error: unknown) {
+    throw invalidPayload('Frankfurter response is not valid JSON', error);
+  }
+}
+
 /**
  * Fetch one complete, immutable USD-based reference-rate snapshot.
  * The bounded range may contain incomplete daily groups; only its latest exact
@@ -266,7 +482,7 @@ export async function fetchExchangeRates(
 
     let payload: unknown;
     try {
-      payload = await Promise.race([response.json() as Promise<unknown>, timeout]);
+      payload = await Promise.race([readBoundedJson(response, controller.signal), timeout]);
     } catch (error: unknown) {
       if (timedOut || (error instanceof ExchangeRateServiceError && error.code === 'timeout')) {
         throw new ExchangeRateServiceError('timeout', 'Exchange-rate request timed out', {

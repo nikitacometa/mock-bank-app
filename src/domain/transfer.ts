@@ -7,6 +7,7 @@ import type {
 import { appendRow, balanceOf } from './ledger';
 import { applySettleAccount } from './interest';
 import { convertMoney, quoteCrossRate } from './currency';
+import { isWithinCommandUsdLimit } from './commandLimits';
 
 interface TransferInputBase {
   fromAccountId: string;
@@ -32,12 +33,15 @@ export type TransferRequest = WithoutNow<TransferInput>;
 
 export type TransferError =
   | 'invalid_amount'
+  | 'amount_too_large'
   | 'invalid_client_transfer_id'
   | 'insufficient_funds'
   | 'same_account'
   | 'unknown_target'
+  | 'account_closed'
   | 'invalid_exchange_rate'
   | 'converted_amount_too_small'
+  | 'capacity'
   | 'balance_overflow';
 
 export type TransferOutcome =
@@ -112,6 +116,12 @@ export function applyTransfer(state: BankState, input: TransferInput): TransferO
     ? state.contacts.find((c) => c.id === input.toContactId)
     : undefined;
   if (!from || (!toAccount && !toContact)) return { ok: false, error: 'unknown_target' };
+  if (from.status !== 'active' || (toAccount && toAccount.status !== 'active')) {
+    return { ok: false, error: 'account_closed' };
+  }
+  if (!isWithinCommandUsdLimit(BigInt(input.amountMinor), from.currency, state.exchangeRates)) {
+    return { ok: false, error: 'amount_too_large' };
+  }
 
   let targetAmountMinor = input.amountMinor;
   let fxSnapshot: Readonly<TransactionFxSnapshot> | undefined;

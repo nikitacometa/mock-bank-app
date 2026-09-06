@@ -1,16 +1,39 @@
 import { BotApiClient, TelegramApiError, type BotCommand } from './bot-api.js';
 import type { ServiceLogger } from './logger.js';
+import type { LedgerMode } from './repository.js';
 
-const EN_COMMANDS: readonly BotCommand[] = [
-  { command: 'start', description: 'Open Cometa' },
+const BASE_EN_COMMANDS: readonly BotCommand[] = [
+  { command: 'start', description: 'Open the Cometa dashboard' },
   { command: 'settings', description: 'Language, currency, and name' },
   { command: 'help', description: 'How the demo works' },
   { command: 'privacy', description: 'What Cometa stores' },
 ];
 
-const RU_COMMANDS: readonly BotCommand[] = [
-  { command: 'start', description: 'Открыть Cometa' },
+const SERVER_EN_COMMANDS: readonly BotCommand[] = [
+  { command: 'start', description: 'Open the Cometa dashboard' },
+  { command: 'add', description: 'Record an expense or income' },
+  { command: 'accounts', description: 'Manage demo accounts' },
+  { command: 'recurring', description: 'Manage monthly entries' },
+  { command: 'settings', description: 'Language, currency, and name' },
+  { command: 'cancel', description: 'Cancel the current step' },
+  { command: 'help', description: 'How the demo works' },
+  { command: 'privacy', description: 'What Cometa stores' },
+];
+
+const BASE_RU_COMMANDS: readonly BotCommand[] = [
+  { command: 'start', description: 'Открыть dashboard Cometa' },
   { command: 'settings', description: 'Язык, валюта и имя' },
+  { command: 'help', description: 'Как работает демо' },
+  { command: 'privacy', description: 'Какие данные хранит Cometa' },
+];
+
+const SERVER_RU_COMMANDS: readonly BotCommand[] = [
+  { command: 'start', description: 'Открыть dashboard Cometa' },
+  { command: 'add', description: 'Записать расход или поступление' },
+  { command: 'accounts', description: 'Управлять демо-счетами' },
+  { command: 'recurring', description: 'Управлять повторениями' },
+  { command: 'settings', description: 'Язык, валюта и имя' },
+  { command: 'cancel', description: 'Отменить текущий шаг' },
   { command: 'help', description: 'Как работает демо' },
   { command: 'privacy', description: 'Какие данные хранит Cometa' },
 ];
@@ -26,6 +49,7 @@ type SetupSleep = (milliseconds: number, signal: AbortSignal) => Promise<void>;
 interface SetupRetryOptions {
   readonly sleep?: SetupSleep;
   readonly deadlineSignal?: AbortSignal;
+  readonly ledgerMode?: LedgerMode;
 }
 
 interface ProfileSetupAction {
@@ -118,23 +142,33 @@ export async function reconcileWebhook(
 export async function setupBotProfile(
   client: BotApiClient,
   signal: AbortSignal,
+  ledgerMode: LedgerMode = 'local',
 ): Promise<void> {
-  for (const action of profileSetupActions(client, signal)) await action.run();
+  for (const action of profileSetupActions(client, signal, ledgerMode)) await action.run();
 }
 
 function profileSetupActions(
   client: BotApiClient,
   signal: AbortSignal,
+  ledgerMode: LedgerMode,
 ): readonly ProfileSetupAction[] {
+  const englishCommands = commandsForLedgerMode(ledgerMode, 'en');
+  const russianCommands = commandsForLedgerMode(ledgerMode, 'ru');
   return [
     { step: 'profile.identity', run: () => client.getMe(signal) },
     { step: 'profile.menu.default', run: () => client.setDefaultMenuButton(signal) },
     {
       step: 'profile.commands.default',
-      run: () => client.setMyCommands(EN_COMMANDS, undefined, signal),
+      run: () => client.setMyCommands(englishCommands, undefined, signal),
     },
-    { step: 'profile.commands.ru', run: () => client.setMyCommands(RU_COMMANDS, 'ru', signal) },
-    { step: 'profile.commands.en', run: () => client.setMyCommands(EN_COMMANDS, 'en', signal) },
+    {
+      step: 'profile.commands.ru',
+      run: () => client.setMyCommands(russianCommands, 'ru', signal),
+    },
+    {
+      step: 'profile.commands.en',
+      run: () => client.setMyCommands(englishCommands, 'en', signal),
+    },
     { step: 'profile.name.default', run: () => client.setMyName('Cometa', undefined, signal) },
     { step: 'profile.name.ru', run: () => client.setMyName('Cometa', 'ru', signal) },
     { step: 'profile.name.en', run: () => client.setMyName('Cometa', 'en', signal) },
@@ -189,6 +223,16 @@ function profileSetupActions(
   ];
 }
 
+export function commandsForLedgerMode(
+  ledgerMode: LedgerMode,
+  locale: 'ru' | 'en',
+): readonly BotCommand[] {
+  if (locale === 'ru') {
+    return ledgerMode === 'server' ? SERVER_RU_COMMANDS : BASE_RU_COMMANDS;
+  }
+  return ledgerMode === 'server' ? SERVER_EN_COMMANDS : BASE_EN_COMMANDS;
+}
+
 export async function setupBotForPolling(
   client: BotApiClient,
   signal: AbortSignal,
@@ -197,6 +241,7 @@ export async function setupBotForPolling(
 ): Promise<void> {
   const sleep = options.sleep ?? abortableSetupDelay;
   const deadlineSignal = options.deadlineSignal ?? AbortSignal.timeout(SETUP_DEADLINE_MS);
+  const ledgerMode = options.ledgerMode ?? 'local';
   const setupSignal = AbortSignal.any([signal, deadlineSignal]);
   try {
     await retrySetupStep(
@@ -206,7 +251,7 @@ export async function setupBotForPolling(
       logger,
       sleep,
     );
-    for (const action of profileSetupActions(client, setupSignal)) {
+    for (const action of profileSetupActions(client, setupSignal, ledgerMode)) {
       await retrySetupStep(action.step, action.run, setupSignal, logger, sleep);
     }
   } catch (error: unknown) {

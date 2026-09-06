@@ -2,7 +2,7 @@ import { useBankStore } from '@/store/bankStore';
 import { useUiStore } from '@/store/uiStore';
 import { usePlatform } from '@/platform/usePlatform';
 import { currencyName, useI18n } from '@/i18n';
-import { groupDigits, localizeDemoText } from '../../format';
+import { accountDisplayName, groupDigits, localizeDemoText } from '../../format';
 import { Sheet } from '../../primitives/Sheet';
 import { BankCard } from '../../BankCard';
 import { IconCopy, IconFreeze } from '../../icons';
@@ -16,7 +16,7 @@ export function CardDetailSheet({ cardId }: { cardId: string }) {
   const platform = usePlatform();
   const { locale, t } = useI18n();
 
-  if (!card || !account) return null;
+  if (!card || !account || account.status !== 'active') return null;
   const frozen = card.status === 'frozen';
 
   const copyNumber = async () => {
@@ -50,7 +50,7 @@ export function CardDetailSheet({ cardId }: { cardId: string }) {
           <button className="flex w-full items-center justify-between py-3.5 text-left" onClick={copyNumber}>
             <span>
               <span className="block text-[0.8125rem] text-ink-3">
-                {t('cardDetails.account', { name: localizeDemoText(account.name, locale) })}
+                {t('cardDetails.account', { name: accountDisplayName(account, locale) })}
               </span>
               <span className="num mt-0.5 block text-[0.9375rem]">{groupDigits(account.number)}</span>
             </span>

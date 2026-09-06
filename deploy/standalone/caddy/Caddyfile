@@ -1,0 +1,33 @@
+# Caddy owns public HTTP/TLS. The release Nginx remains the loopback HTTPS
+# upstream for this migration cycle so its complete SPA/API policy stays intact.
+{
+	# Only the caddy service account may load runtime configuration.
+	admin unix//var/lib/caddy/.local/share/caddy/admin.sock|0200
+	persist_config off
+	servers {
+		# UFW intentionally exposes TCP only during the compatibility bridge.
+		protocols h1 h2
+	}
+}
+
+euphoria.bot {
+	reverse_proxy https://127.0.0.1:8443 {
+		header_up Host {host}
+		transport http {
+			tls
+			tls_server_name euphoria.bot
+		}
+	}
+}
+
+# Preserve the existing Nginx-owned canonical redirect by forwarding the
+# original www Host and selecting its matching loopback TLS server block.
+www.euphoria.bot {
+	reverse_proxy https://127.0.0.1:8443 {
+		header_up Host {host}
+		transport http {
+			tls
+			tls_server_name www.euphoria.bot
+		}
+	}
+}

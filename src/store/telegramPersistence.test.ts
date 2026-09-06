@@ -3,7 +3,7 @@ import { buildSeed } from '@/domain/seed';
 import type { BankState } from '@/domain/types';
 
 const NOW = '2026-09-01T12:00:00.000Z';
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 function telegramState(telegramId: string, displayName: string): BankState {
   return {
@@ -14,6 +14,10 @@ function telegramState(telegramId: string, displayName: string): BankState {
 
 function envelope(state: BankState): string {
   return JSON.stringify({ schemaVersion: SCHEMA_VERSION, state });
+}
+
+function parsedEnvelope(raw: string | undefined): unknown {
+  return raw === undefined ? undefined : (JSON.parse(raw) as unknown);
 }
 
 async function importTelegramPersistence() {
@@ -85,12 +89,16 @@ describe('Telegram persistence namespaces', () => {
     expect(persistence.loadPersisted()).toEqual({ kind: 'ok', state: legacyState });
     expect(persistence.loadLocalePreference()).toBe('en');
     expect(persistence.loadAppliedLaunchPreferencesReceipt()).toEqual(receipt);
-    expect(storage.get('cometa.bank.tma.user.42')).toBe(envelope(legacyState));
+    expect(parsedEnvelope(storage.get('cometa.bank.tma.user.42'))).toEqual(
+      parsedEnvelope(envelope(legacyState)),
+    );
     expect(storage.get('cometa.bank.tma.user.42.locale')).toBe('en');
 
     persistence.quarantineTelegramPersistence();
     expect(persistence.loadPersisted()).toEqual({ kind: 'empty' });
-    expect(storage.get('cometa.bank.tma.user.42')).toBe(envelope(legacyState));
+    expect(parsedEnvelope(storage.get('cometa.bank.tma.user.42'))).toEqual(
+      parsedEnvelope(envelope(legacyState)),
+    );
 
     expect(persistence.activateTelegramPersistence('42')).toBe(true);
     expect(persistence.loadPersisted()).toEqual({ kind: 'ok', state: legacyState });

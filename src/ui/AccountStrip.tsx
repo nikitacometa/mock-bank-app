@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { Account } from '@/domain/types';
 import { useI18n } from '@/i18n';
-import { localizeDemoText } from './format';
+import { accountDisplayName } from './format';
 import { CurrencyBadge } from './CurrencyBadge';
 
 interface AccountStripProps {
@@ -14,7 +14,7 @@ interface AccountStripProps {
 
 export function AccountStrip({ accounts, value, onChange, label, compact = false }: AccountStripProps) {
   const stripRef = useRef<HTMLDivElement>(null);
-  const { locale } = useI18n();
+  const { locale, t } = useI18n();
 
   useEffect(() => {
     const strip = stripRef.current;
@@ -41,6 +41,12 @@ export function AccountStrip({ accounts, value, onChange, label, compact = false
     >
       {accounts.map((account) => {
         const selected = account.id === value;
+        const displayName = accountDisplayName(account, locale);
+        const accessibilityLabel = [
+          account.currency,
+          displayName,
+          ...(account.status === 'closed' ? [t('account.closed')] : []),
+        ].join(', ');
         return (
           <button
             key={account.id}
@@ -52,16 +58,20 @@ export function AccountStrip({ accounts, value, onChange, label, compact = false
             }`}
             onClick={() => onChange(account.id)}
             aria-pressed={selected}
+            aria-label={accessibilityLabel}
           >
             <CurrencyBadge currency={account.currency} size={32} />
             <span className="leading-tight">
-              <span className="block text-[0.8125rem] font-medium">{account.currency}</span>
+              <span className="block text-[0.8125rem] font-medium">
+                {account.status === 'closed' ? <span aria-hidden="true">○ </span> : null}
+                {account.currency}
+              </span>
               <span
                 className={`block truncate text-[0.6875rem] text-ink-3 ${
                   compact ? 'max-w-16' : 'max-w-24'
                 }`}
               >
-                {localizeDemoText(account.name, locale)}
+                {displayName}
               </span>
             </span>
           </button>

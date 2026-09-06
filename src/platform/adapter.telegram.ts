@@ -9,10 +9,22 @@ import {
   themeParams,
   viewport,
 } from '@tma.js/sdk-react';
-import { SUPPORTED_CURRENCIES } from '@/domain/currency';
-import { isAppLocale } from '@/i18n/catalog';
-import type { LaunchPreferences, PlatformAdapter, PlatformUser } from './types';
+import type { PlatformAdapter, PlatformUser } from './types';
 import { copyTextToClipboard } from './clipboard';
+import { isClientMutationId } from './clientMutationId';
+import {
+  assertServerRevisionDigest,
+  normalizeDisplayName,
+  parseBankCommandResponse,
+  parseBankImportResponse,
+  parseBankRatesRefreshResponse,
+  parseLaunchState,
+  parseTelegramApiError,
+  TelegramApiRequestError,
+  TelegramApiResponseError,
+} from './bankApi';
+
+export { normalizeDisplayName, parseLaunchPreferences } from './bankApi';
 
 let initialized = false;
 let initDataRestored = false;
@@ -33,44 +45,8 @@ let desiredBackAction: VoidFunction | null = null;
 const BRAND_DARK_CHROME = '#101116' as const;
 const VIEWPORT_MOUNT_TIMEOUT_MS = 2_500;
 const NATIVE_CONTROLS_RETRY_DELAYS_MS = [250, 750, 1_500, 3_000] as const;
-const MAX_DISPLAY_NAME_CODE_POINTS = 48;
-const DISALLOWED_DISPLAY_NAME_CHARACTERS = /[\p{Cc}\p{Cf}\p{Cs}]/u;
-const UNICODE_SEPARATORS = /\p{Z}+/gu;
 const forwardMainButtonClick = () => activeMainButtonAction?.();
 const forwardBackButtonClick = () => activeBackAction?.();
-
-class TelegramPreferencesRequestError extends Error {
-  readonly retryable: boolean;
-
-  constructor(status: number) {
-    super(`Telegram preferences request failed (${status})`);
-    this.name = 'TelegramPreferencesRequestError';
-    this.retryable = status === 408 || status === 425 || status === 429 || status >= 500;
-  }
-}
-
-class TelegramPreferencesResponseError extends TypeError {
-  readonly retryable = false;
-
-  constructor() {
-    super('Invalid Telegram preferences response');
-    this.name = 'TelegramPreferencesResponseError';
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-export function normalizeDisplayName(value: string): string | null {
-  if (DISALLOWED_DISPLAY_NAME_CHARACTERS.test(value)) return null;
-  const normalized = value
-    .normalize('NFC')
-    .replace(UNICODE_SEPARATORS, ' ')
-    .trim();
-  if (normalized === '' || [...normalized].length > MAX_DISPLAY_NAME_CODE_POINTS) return null;
-  return normalized;
-}
 
 export function normalizeTelegramId(value: unknown): string | undefined {
   if (typeof value === 'number') {
@@ -79,45 +55,6 @@ export function normalizeTelegramId(value: unknown): string | undefined {
   return typeof value === 'string' && /^[1-9]\d{0,19}$/.test(value) ? value : undefined;
 }
 
-export function parseLaunchPreferences(value: unknown): LaunchPreferences {
-  if (!isRecord(value)) throw new TypeError('Invalid Telegram preferences response');
-  const displayName = value.displayName;
-  const telegramId = value.telegramId;
-  const revisionEpoch = value.revisionEpoch;
-  const revision = value.revision;
-  const primaryCurrency = value.primaryCurrency;
-  const normalizedDisplayName =
-    typeof displayName === 'string' ? normalizeDisplayName(displayName) : null;
-  const validName = normalizedDisplayName !== null && normalizedDisplayName === displayName;
-  const validCurrency =
-    typeof primaryCurrency === 'string' &&
-    (SUPPORTED_CURRENCIES as readonly string[]).includes(primaryCurrency);
-
-  if (
-    value.version !== 1 ||
-    typeof revisionEpoch !== 'string' ||
-    !/^[0-9a-f]{32}$/.test(revisionEpoch) ||
-    !Number.isSafeInteger(revision) ||
-    (revision as number) < 1 ||
-    !isAppLocale(value.locale) ||
-    !validCurrency ||
-    !validName ||
-    typeof telegramId !== 'string' ||
-    !/^[1-9]\d{0,19}$/.test(telegramId)
-  ) {
-    throw new TypeError('Invalid Telegram preferences response');
-  }
-
-  return {
-    version: 1,
-    revisionEpoch,
-    revision: revision as number,
-    locale: value.locale,
-    primaryCurrency: primaryCurrency as LaunchPreferences['primaryCurrency'],
-    displayName,
-    telegramId,
-  };
-}
 
 function clearMainButtonBinding(): boolean {
   const removeClick = removeMainButtonClick;
@@ -492,12 +429,113 @@ export function isTelegramSetupComplete(): boolean {
 
 export function createTelegramAdapter(): PlatformAdapter {
   initializeTelegram();
+  let verifiedRawInitData: string | null = null;
+  let verifiedTelegramId: string | null = null;
+  let observedRawInitData: string | null | undefined;
+  let observedSessionFingerprint: string | undefined;
+  let nextSessionFingerprint = 0;
+
+  const invalidateVerifiedSession = (): void => {
+    verifiedRawInitData = null;
+    verifiedTelegramId = null;
+  };
+
+  const readRawInitData = (): string | null => {
+    let rawInitData: string | undefined;
+    safeSdk('read raw init data', () => {
+      rawInitData = retrieveRawInitData();
+    });
+    const observed = rawInitData && rawInitData.length > 0 ? rawInitData : null;
+    if (observed !== observedRawInitData) {
+      observedRawInitData = observed;
+      observedSessionFingerprint = observed === null
+        ? undefined
+        : `tma-session-${++nextSessionFingerprint}`;
+    }
+    return observed;
+  };
+
+  const assertRawSessionUnchanged = (
+    expectedRawInitData: string,
+    requireVerifiedSession = false,
+  ): void => {
+    if (
+      readRawInitData() === expectedRawInitData &&
+      (!requireVerifiedSession || verifiedRawInitData === expectedRawInitData)
+    ) {
+      return;
+    }
+    invalidateVerifiedSession();
+    throw new TelegramApiRequestError(425, 'telegram_session_changed');
+  };
+
+  const requestJson = async (
+    path: string,
+    body: unknown,
+    signal?: AbortSignal,
+    requireVerifiedSession = true,
+  ): Promise<{ readonly value: unknown; readonly rawInitData: string }> => {
+    const rawInitData = readRawInitData();
+    if (rawInitData === null) {
+      if (requireVerifiedSession) {
+        invalidateVerifiedSession();
+        throw new TelegramApiRequestError(425, 'telegram_session_changed');
+      }
+      throw new TelegramApiRequestError(401, 'init_data_unavailable');
+    }
+    if (requireVerifiedSession && rawInitData !== verifiedRawInitData) {
+      invalidateVerifiedSession();
+      throw new TelegramApiRequestError(425, 'telegram_session_changed');
+    }
+    let response: Response;
+    try {
+      response = await fetch(path, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          Authorization: `tma ${rawInitData}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        credentials: 'same-origin',
+        cache: 'no-store',
+        signal,
+      });
+    } catch (error: unknown) {
+      if (requireVerifiedSession) assertRawSessionUnchanged(rawInitData, true);
+      throw error;
+    }
+    if (requireVerifiedSession) assertRawSessionUnchanged(rawInitData, true);
+    if (!response.ok) {
+      let error: TelegramApiRequestError;
+      try {
+        error = await parseTelegramApiError(response);
+      } finally {
+        if (requireVerifiedSession) assertRawSessionUnchanged(rawInitData, true);
+      }
+      throw error;
+    }
+    let value: unknown;
+    try {
+      value = await response.json() as unknown;
+    } catch {
+      if (requireVerifiedSession) assertRawSessionUnchanged(rawInitData, true);
+      throw new TelegramApiResponseError();
+    }
+    if (requireVerifiedSession) assertRawSessionUnchanged(rawInitData, true);
+    return { value, rawInitData };
+  };
 
   return {
     isTelegram: true,
 
     getCurrentUser() {
       return getCurrentTelegramUser();
+    },
+
+    getSessionFingerprint() {
+      readRawInitData();
+      return observedSessionFingerprint;
     },
 
     haptic(kind) {
@@ -542,31 +580,107 @@ export function createTelegramAdapter(): PlatformAdapter {
       };
     },
 
-    async loadLaunchPreferences(signal) {
-      let rawInitData: string | undefined;
-      safeSdk('read raw init data', () => {
-        rawInitData = retrieveRawInitData();
-      });
-      if (!rawInitData) return null;
+    async loadLaunchState(signal) {
+      if (readRawInitData() === null) return null;
+      const response = await requestJson('/api/tma/bootstrap', {}, signal, false);
+      const clientNowISO = new Date().toISOString();
+      const launch = parseLaunchState(response.value, clientNowISO);
+      if (launch.bank?.mode === 'server') await assertServerRevisionDigest(launch.bank);
+      // A bootstrap response that raced a Telegram account switch must not
+      // authorize mutations for the raw session that is no longer active.
+      assertRawSessionUnchanged(response.rawInitData);
+      verifiedRawInitData = response.rawInitData;
+      verifiedTelegramId = launch.telegramId;
+      return launch;
+    },
 
-      const response = await fetch('/api/tma/bootstrap', {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          Authorization: `tma ${rawInitData}`,
-          'Content-Type': 'application/json',
-        },
-        body: '{}',
-        credentials: 'same-origin',
-        cache: 'no-store',
-        signal,
-      });
-      if (!response.ok) throw new TelegramPreferencesRequestError(response.status);
-      try {
-        return parseLaunchPreferences(await response.json());
-      } catch {
-        throw new TelegramPreferencesResponseError();
+    async importBankState(request, signal) {
+      if (
+        !isClientMutationId(request.importId) ||
+        (request.stateVersion !== 4 && request.stateVersion !== 5)
+      ) {
+        throw new TelegramApiResponseError();
       }
+      const expectedTelegramId = verifiedTelegramId;
+      if (expectedTelegramId === null) {
+        throw new TelegramApiRequestError(425, 'telegram_session_changed');
+      }
+      if (request.state.profile.telegramId !== expectedTelegramId) {
+        throw new TelegramApiResponseError();
+      }
+      const response = await requestJson('/api/tma/bank-import', request, signal);
+      const clientNowISO = new Date().toISOString();
+      const parsed = parseBankImportResponse(
+        response.value,
+        expectedTelegramId,
+        clientNowISO,
+      );
+      try {
+        await assertServerRevisionDigest(parsed);
+      } catch (error: unknown) {
+        assertRawSessionUnchanged(response.rawInitData, true);
+        throw error;
+      }
+      assertRawSessionUnchanged(response.rawInitData, true);
+      return parsed;
+    },
+
+    async executeBankCommand(command, clientMutationId, signal) {
+      if (!isClientMutationId(clientMutationId)) {
+        throw new TelegramApiResponseError();
+      }
+      const expectedTelegramId = verifiedTelegramId;
+      if (expectedTelegramId === null) {
+        throw new TelegramApiRequestError(425, 'telegram_session_changed');
+      }
+      const response = await requestJson(
+        '/api/tma/bank-command',
+        { version: 1, clientMutationId, command },
+        signal,
+      );
+      const clientNowISO = new Date().toISOString();
+      const parsed = parseBankCommandResponse(
+        response.value,
+        expectedTelegramId,
+        clientNowISO,
+      );
+      try {
+        await assertServerRevisionDigest(parsed);
+      } catch (error: unknown) {
+        assertRawSessionUnchanged(response.rawInitData, true);
+        throw error;
+      }
+      assertRawSessionUnchanged(response.rawInitData, true);
+      return parsed;
+    },
+
+    async refreshBankRates(clientMutationId, signal) {
+      if (!isClientMutationId(clientMutationId)) {
+        throw new TelegramApiResponseError();
+      }
+      const expectedTelegramId = verifiedTelegramId;
+      if (expectedTelegramId === null) {
+        throw new TelegramApiRequestError(425, 'telegram_session_changed');
+      }
+      const response = await requestJson(
+        '/api/tma/bank-rates',
+        { version: 1, clientMutationId },
+        signal,
+      );
+      const clientNowISO = new Date().toISOString();
+      const parsed = parseBankRatesRefreshResponse(
+        response.value,
+        expectedTelegramId,
+        clientNowISO,
+      );
+      try {
+        await assertServerRevisionDigest(parsed);
+      } catch (error: unknown) {
+        assertRawSessionUnchanged(response.rawInitData, true);
+        throw error;
+      }
+      assertRawSessionUnchanged(response.rawInitData, true);
+      return parsed;
     },
   };
 }

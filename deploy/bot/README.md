@@ -5,7 +5,8 @@ on `127.0.0.1:8787`. The bot and `cometa-proxy` share the dedicated internal
 `cometa_bank_edge` network; the bot is not attached to `cometa_default`, so it
 cannot reach that network's MongoDB or other workloads. A separate
 Compose-owned bridge provides outbound Bot API access and contains no other
-service. The shared Nginx proxy routes bootstrap traffic to `POST /bootstrap`.
+service. The shared Nginx proxy routes signed TMA traffic to `POST /bootstrap`,
+`POST /bank-import`, and `POST /bank-command`.
 `GET /healthz` is intended for Docker and private service probes.
 
 ## First install
@@ -130,10 +131,10 @@ Transient network, 429, and 5xx failures use bounded retries and honor Telegram
 `retry_after`; permanent 4xx responses fail closed. A failed step keeps `/healthz`
 unready.
 
-The Nginx location resolves the container alias through Docker DNS on each
+The Nginx locations resolve the container alias through Docker DNS on each
 request (10-second cache), so token rotation, recreate, and rollback do not
-need a proxy reload. A stopped bot degrades only this bootstrap endpoint to
+need a proxy reload. A stopped bot degrades only the TMA JSON endpoints to
 `502`; it does not invalidate the shared proxy configuration. App-scoped
-Nginx zones cap one source address at 20 requests/second with a burst of 100
-and 40 concurrent bootstrap requests. The deliberately generous limits avoid
-punishing many Telegram users behind one carrier NAT.
+Nginx zones keep bootstrap generous for carrier NAT, while signed bank imports
+and commands have separate body, request-rate, and connection ceilings before
+they reach the single SQLite worker.

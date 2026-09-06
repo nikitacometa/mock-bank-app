@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useBankStore } from '@/store/bankStore';
 import { useUiStore } from '@/store/uiStore';
 import { balanceOf } from '@/domain/ledger';
@@ -6,7 +6,8 @@ import { formatMoney } from '@/domain/money';
 import { useI18n } from '@/i18n';
 import { BankCard } from '../BankCard';
 import { CurrencyBadge } from '../CurrencyBadge';
-import { localizeDemoText } from '../format';
+import { accountDisplayName } from '../format';
+import { IconCards } from '../icons';
 
 /**
  * Card switching is native CSS scroll-snap (zero JS in the gesture path).
@@ -23,6 +24,14 @@ export function Cards() {
   const trackRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef({ pointerId: -1, startX: 0, startScroll: 0, moved: false });
   const [activeCard, setActiveCard] = useState(0);
+  const activeAccountIds = useMemo(
+    () => new Set(accounts.filter((account) => account.status === 'active').map((account) => account.id)),
+    [accounts],
+  );
+  const activeCards = useMemo(
+    () => cards.filter((card) => activeAccountIds.has(card.accountId)),
+    [activeAccountIds, cards],
+  );
 
   useEffect(() => {
     const track = trackRef.current;
@@ -55,7 +64,7 @@ export function Cards() {
       track.removeEventListener('scroll', onScroll);
       cancelAnimationFrame(raf);
     };
-  }, [cards.length]);
+  }, [activeCards.length]);
 
   const onTilt = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerType !== 'mouse') return;
@@ -114,83 +123,98 @@ export function Cards() {
         <h1 className="text-[1.375rem] font-semibold tracking-tight">{t('cards.title')}</h1>
       </header>
 
-      <div
-        ref={trackRef}
-        className="scrollbar-none mt-2 flex snap-x snap-mandatory select-none gap-4 overflow-x-auto px-8 py-4"
-        style={{ perspective: '900px', touchAction: 'pan-x' }}
-        onPointerDown={startDrag}
-        onPointerMove={moveDrag}
-        onPointerUp={finishDrag}
-        onPointerCancel={finishDrag}
-        onLostPointerCapture={finishDrag}
-      >
-        {cards.map((card) => {
-          const account = accounts.find((a) => a.id === card.accountId);
-          return (
-            <div
-              key={card.id}
-              data-card
-              className="w-[82%] shrink-0 snap-center transition-transform duration-100"
-              style={{
-                transform:
-                  'rotateY(calc(var(--ry, 0deg) + var(--mry, 0deg))) rotateX(var(--mrx, 0deg)) scale(var(--s, 1))',
-                transformStyle: 'preserve-3d',
-              }}
-              onPointerMove={onTilt}
-              onPointerLeave={resetTilt}
-            >
-              <button
-                className="block w-full text-left"
-                onClick={() => openSheet({ kind: 'cardDetail', cardId: card.id })}
-                aria-label={t('cards.cardLabel', { last4: card.last4 })}
-              >
-                <BankCard card={card} />
-              </button>
-              <div className="mt-3 flex items-center justify-center gap-2 px-1 text-left">
-                {account && <CurrencyBadge currency={account.currency} size={30} />}
-                <div>
-                  <div className="text-[0.875rem]">
-                    {localizeDemoText(account?.name, locale)}
-                  </div>
-                  <div className="num mt-0.5 text-[0.75rem] text-ink-3">
-                    {account
-                      ? formatMoney(balanceOf({ transactions }, account.id), account.currency, locale)
-                      : ''}
+      {activeCards.length === 0 ? (
+        <section className="mx-5 mt-4 rounded-card border border-line/60 bg-surface px-6 py-12 text-center">
+          <span className="mx-auto flex size-14 items-center justify-center rounded-full bg-surface-2 text-ink-2">
+            <IconCards size={25} />
+          </span>
+          <h2 className="mt-4 text-[1rem] font-medium">{t('cards.empty.title')}</h2>
+          <p className="mt-2 text-[0.8125rem] leading-relaxed text-ink-3">
+            {t('cards.empty.description')}
+          </p>
+        </section>
+      ) : (
+        <>
+
+          <div
+            ref={trackRef}
+            className="scrollbar-none mt-2 flex snap-x snap-mandatory select-none gap-4 overflow-x-auto px-8 py-4"
+            style={{ perspective: '900px', touchAction: 'pan-x' }}
+            onPointerDown={startDrag}
+            onPointerMove={moveDrag}
+            onPointerUp={finishDrag}
+            onPointerCancel={finishDrag}
+            onLostPointerCapture={finishDrag}
+          >
+            {activeCards.map((card) => {
+              const account = accounts.find((a) => a.id === card.accountId);
+              return (
+                <div
+                  key={card.id}
+                  data-card
+                  className="w-[82%] shrink-0 snap-center transition-transform duration-100"
+                  style={{
+                    transform:
+                      'rotateY(calc(var(--ry, 0deg) + var(--mry, 0deg))) rotateX(var(--mrx, 0deg)) scale(var(--s, 1))',
+                    transformStyle: 'preserve-3d',
+                  }}
+                  onPointerMove={onTilt}
+                  onPointerLeave={resetTilt}
+                >
+                  <button
+                    className="block w-full text-left"
+                    onClick={() => openSheet({ kind: 'cardDetail', cardId: card.id })}
+                    aria-label={t('cards.cardLabel', { last4: card.last4 })}
+                  >
+                    <BankCard card={card} />
+                  </button>
+                  <div className="mt-3 flex items-center justify-center gap-2 px-1 text-left">
+                    {account && <CurrencyBadge currency={account.currency} size={30} />}
+                    <div>
+                      <div className="text-[0.875rem]">
+                        {account === undefined ? '' : accountDisplayName(account, locale)}
+                      </div>
+                      <div className="num mt-0.5 text-[0.75rem] text-ink-3">
+                        {account
+                          ? formatMoney(balanceOf({ transactions }, account.id), account.currency, locale)
+                          : ''}
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+              );
+            })}
+          </div>
 
-      <span className="sr-only" role="status" aria-live="polite">
-        {t('cards.position', { current: activeCard + 1, total: cards.length })}
-      </span>
-      <div className="mt-1 flex justify-center">
-        {cards.map((card, index) => (
-          <button
-            key={card.id}
-            className="flex size-11 items-center justify-center"
-            aria-label={t('cards.show', { index: index + 1 })}
-            aria-current={activeCard === index}
-            onClick={() => {
-              const cardElement = trackRef.current?.querySelectorAll<HTMLElement>('[data-card]')[index];
-              cardElement?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
-            }}
-          >
-            <span
-              className={`h-1.5 rounded-full transition-all ${
-                activeCard === index ? 'w-5 bg-ivory' : 'w-1.5 bg-line'
-              }`}
-            />
-          </button>
-        ))}
-      </div>
+          <span className="sr-only" role="status" aria-live="polite">
+            {t('cards.position', { current: activeCard + 1, total: activeCards.length })}
+          </span>
+          <div className="mt-1 flex justify-center">
+            {activeCards.map((card, index) => (
+              <button
+                key={card.id}
+                className="flex size-11 items-center justify-center"
+                aria-label={t('cards.show', { index: index + 1 })}
+                aria-current={activeCard === index}
+                onClick={() => {
+                  const cardElement = trackRef.current?.querySelectorAll<HTMLElement>('[data-card]')[index];
+                  cardElement?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+                }}
+              >
+                <span
+                  className={`h-1.5 rounded-full transition-all ${
+                    activeCard === index ? 'w-5 bg-ivory' : 'w-1.5 bg-line'
+                  }`}
+                />
+              </button>
+            ))}
+          </div>
 
-      <p className="mt-2 px-8 text-center text-[0.8125rem] text-ink-3">
-        {t('cards.hint')}
-      </p>
+          <p className="mt-2 px-8 text-center text-[0.8125rem] text-ink-3">
+            {t('cards.hint')}
+          </p>
+        </>
+      )}
     </div>
   );
 }

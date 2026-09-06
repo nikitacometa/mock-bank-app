@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SUPPORTED_CURRENCIES } from './currency';
+import { convertMoney, SUPPORTED_CURRENCIES } from './currency';
 import {
   buildSeed,
   CHECKING_ID,
@@ -14,6 +14,16 @@ import { balanceOf } from './ledger';
 const NOW = new Date(2026, 8, 1, 23, 59, 59, 999).toISOString();
 const CHECKING_FLOOR_MINOR = 5_000_000;
 const SAVINGS_OPENING_MINOR = 850_000_000;
+const FIXTURE_COMPANIONS = {
+  KZT: ['USD', 'EUR'],
+  THB: ['USD', 'EUR'],
+  VND: ['USD', 'EUR'],
+  RUB: ['USD', 'EUR'],
+  USD: ['EUR', 'KZT'],
+  EUR: ['USD', 'KZT'],
+  IDR: ['USD', 'EUR'],
+  GEL: ['USD', 'EUR'],
+} as const;
 
 describe('buildSeed', () => {
   it('is deterministic: same now → identical state', () => {
@@ -274,4 +284,95 @@ describe('buildSeed', () => {
       'Данияр',
     ]);
   });
+
+  it.each(SUPPORTED_CURRENCIES)(
+    'builds the %s fixture with four roles, 436 rows, and USD 24,021.28 parity',
+    (currency) => {
+      const state = buildSeed('2026-09-02T23:59:59.999Z', currency);
+      const totalUsdMinor = state.accounts.reduce(
+        (sum, account) =>
+          sum +
+          convertMoney(
+            balanceOf(state, account.id),
+            account.currency,
+            'USD',
+            state.exchangeRates,
+          ),
+        0,
+      );
+
+      expect(state.demoBaseCurrency).toBe(currency);
+      expect(state.primaryCurrency).toBe(currency);
+      expect(state.accounts).toHaveLength(4);
+      expect(state.accounts.map((account) => account.role)).toEqual([
+        'primary-checking',
+        'primary-savings',
+        'companion-1',
+        'companion-2',
+      ]);
+      expect(state.accounts.map((account) => account.currency)).toEqual([
+        currency,
+        currency,
+        ...FIXTURE_COMPANIONS[currency],
+      ]);
+      expect(state.accounts.every((account) => account.status === 'active')).toBe(true);
+      expect(state.transactions).toHaveLength(436);
+      expect(totalUsdMinor).toBeGreaterThanOrEqual(2_402_127);
+      expect(totalUsdMinor).toBeLessThanOrEqual(2_402_129);
+      const roleTargets = [133_247, 2_142_427, 80_000, 46_454];
+      for (const [index, account] of state.accounts.entries()) {
+        const roleUsdMinor = convertMoney(
+          balanceOf(state, account.id),
+          account.currency,
+          'USD',
+          state.exchangeRates,
+        );
+        expect(Math.abs(roleUsdMinor - roleTargets[index])).toBeLessThanOrEqual(1);
+      }
+      expect(ledgerErrors(state)).toEqual([]);
+    },
+  );
+
+  it('keeps every synthetic fixture transaction timestamp monotonic by seq', () => {
+    for (const currency of SUPPORTED_CURRENCIES.filter((item) => item !== 'KZT')) {
+      const transactions = buildSeed('2026-09-02T23:59:59.999Z', currency).transactions;
+      for (let index = 1; index < transactions.length; index += 1) {
+        expect(Date.parse(transactions[index].createdAt)).toBeGreaterThanOrEqual(
+          Date.parse(transactions[index - 1].createdAt),
+        );
+      }
+    }
+  });
+
+  it('marks synthetic fixture top-ups as fixture-owned topups', () => {
+    for (const currency of SUPPORTED_CURRENCIES.filter((item) => item !== 'KZT')) {
+      const topUps = buildSeed('2026-09-02T23:59:59.999Z', currency).transactions.filter(
+        (transaction) => transaction.counterparty === 'External account top up',
+      );
+
+      expect(topUps.length).toBeGreaterThan(0);
+      expect(topUps.every((transaction) => transaction.kind === 'topup')).toBe(true);
+    }
+  });
+
+  it.each(SUPPORTED_CURRENCIES)(
+    'keeps the %s fixture byte-stable across host timezones',
+    (currency) => {
+      const environment = (
+        globalThis as typeof globalThis & { process?: { env: Record<string, string | undefined> } }
+      ).process?.env;
+      if (!environment) throw new Error('test runtime has no process environment');
+      const original = environment.TZ;
+      try {
+        environment.TZ = 'Pacific/Kiritimati';
+        const east = buildSeed('2026-09-02T23:59:59.999Z', currency);
+        environment.TZ = 'Pacific/Pago_Pago';
+        const west = buildSeed('2026-09-02T23:59:59.999Z', currency);
+        expect(east).toEqual(west);
+      } finally {
+        if (original === undefined) delete environment.TZ;
+        else environment.TZ = original;
+      }
+    },
+  );
 });

@@ -1,9 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BankState } from '@/domain/types';
+import { applyAddAccount, applyCloseAccount } from '@/domain/accountLifecycle';
 import { balanceOf } from '@/domain/ledger';
-import { buildSeed } from '@/domain/seed';
+import { buildSeed, CHECKING_ID } from '@/domain/seed';
+import { applyBalanceAdjustment } from '@/domain/manualTransactions';
+import { applySettleAllWithinTransactionLimit } from '@/domain/interest';
+import { createRecurringRule, materializeRecurringRules } from '@/domain/recurring';
 import { applyTransfer } from '@/domain/transfer';
 import { SCHEMA_VERSION } from './persistence';
+import { parseBankState } from '@/domain/bankState';
+import type {
+  BankCommandResponse,
+  BankImportResponse,
+  BankRatesRefreshResponse,
+  PlatformAdapter,
+  ServerBankRevision,
+} from '@/platform/types';
 
 const TODAY = new Date().toISOString().slice(0, 10);
 const MIGRATION_NOW = '2026-09-02T12:00:00.000Z';
@@ -36,12 +48,139 @@ function withFreshRates(state: BankState, nowISO: string): BankState {
   };
 }
 
+function padTransactions(
+  state: BankState,
+  target: number,
+  createdAt: string,
+): BankState {
+  if (target < state.transactions.length) throw new Error('Target is below seed size');
+  const accountId = state.accounts.find((account) => account.role === 'primary-checking')?.id;
+  if (accountId === undefined) throw new Error('Missing primary checking account');
+  const balance = balanceOf(state, accountId);
+  const added = Array.from(
+    { length: target - state.transactions.length },
+    (_, index) => {
+      const seq = state.nextSeq + index;
+      return {
+        id: `tx_${seq}`,
+        accountId,
+        seq,
+        amountMinor: 0,
+        balanceAfterMinor: balance,
+        kind: 'purchase' as const,
+        counterparty: 'Capacity fixture',
+        createdAt,
+      };
+    },
+  );
+  return {
+    ...state,
+    transactions: [...state.transactions, ...added],
+    nextSeq: state.nextSeq + added.length,
+  };
+}
+
 async function importTelegramBankStore() {
   // This file imports the web store at module scope for most tests. A fresh
   // graph is required so persistence reads the Telegram environment mock.
   vi.resetModules();
   vi.doMock('@/platform/environment', () => ({ isTelegramMiniApp: () => true }));
   return import('./bankStore');
+}
+
+function serverRevision(
+  state: BankState,
+  revision: number,
+  values: Partial<ServerBankRevision> = {},
+): ServerBankRevision {
+  const telegramId = state.profile.telegramId;
+  if (telegramId === undefined) throw new Error('Server state fixture needs a Telegram ID');
+  return {
+    telegramId,
+    revisionEpoch: 'a'.repeat(32),
+    revision,
+    digest: revision.toString(16).padStart(64, '0'),
+    state,
+    warnings: [],
+    ...values,
+  };
+}
+
+function commandResponse(state: BankState, revision: number): BankCommandResponse {
+  const server = serverRevision(state, revision);
+  return {
+    version: 1,
+    ...server,
+    applied: true,
+    replayed: false,
+    outcome: { ok: true, state, applied: true, warnings: [] },
+  };
+}
+
+function importResponse(state: BankState, revision: number): BankImportResponse {
+  return {
+    version: 1,
+    mode: 'server',
+    imported: true,
+    ...serverRevision(state, revision),
+  };
+}
+
+function ratesResponse(
+  state: BankState,
+  revision: number,
+  updated: boolean,
+): BankRatesRefreshResponse {
+  return {
+    version: 1,
+    ...serverRevision(state, revision),
+    updated,
+  };
+}
+
+function exactBankState(value: BankState): BankState {
+  const parsed = parseBankState(value, new Date().toISOString());
+  if (parsed === null) throw new Error('Invalid BankState test fixture');
+  return parsed;
+}
+
+function deferred<T>(): {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T) => void;
+  readonly reject: (reason?: unknown) => void;
+} {
+  let resolve: (value: T) => void = () => undefined;
+  let reject: (reason?: unknown) => void = () => undefined;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function telegramPlatform(
+  executeBankCommand?: PlatformAdapter['executeBankCommand'],
+  importBankState?: PlatformAdapter['importBankState'],
+  refreshBankRates?: PlatformAdapter['refreshBankRates'],
+): PlatformAdapter {
+  return {
+    isTelegram: true,
+    getCurrentUser: () => ({ displayName: 'Ada', source: 'host', telegramId: '41' }),
+    loadLaunchState: vi.fn(async () => null),
+    importBankState: importBankState ?? vi.fn(async () => {
+      throw new Error('unexpected import');
+    }),
+    executeBankCommand: executeBankCommand ?? vi.fn(async () => {
+      throw new Error('unexpected command');
+    }),
+    refreshBankRates: refreshBankRates ?? vi.fn(async () => {
+      throw new Error('unexpected rate refresh');
+    }),
+    haptic() {},
+    copyText: async () => false,
+    mainButton: { supported: false, show() {}, hide() {} },
+    armBack: () => () => undefined,
+  };
 }
 
 afterEach(() => {
@@ -158,6 +297,1042 @@ describe('useBankStore initial persistence lifecycle', () => {
   });
 });
 
+describe('useBankStore server-authoritative Telegram ledger', () => {
+  it('preserves a different pre-authority device snapshot until server-copy approval', async () => {
+    const local = exactBankState({
+      ...buildSeed(MIGRATION_NOW),
+      profile: { displayName: 'Ada', telegramId: '41' },
+    });
+    const server = exactBankState({ ...local, primaryCurrency: 'EUR' });
+    const storage = new Map<string, string>([
+      [
+        'cometa.bank.tma.user.41',
+        JSON.stringify({ schemaVersion: SCHEMA_VERSION, state: local }),
+      ],
+    ]);
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => storage.set(key, value)),
+    });
+    const { useBankStore } = await importTelegramBankStore();
+    await expect(
+      useBankStore.getState().activateVerifiedTelegramSession('41'),
+    ).resolves.toBe(true);
+    const platform = telegramPlatform();
+    const bank = {
+      contractVersion: 1 as const,
+      mode: 'server' as const,
+      ...serverRevision(server, 2),
+    };
+
+    await expect(
+      useBankStore.getState().synchronizeTelegramBank(
+        '41',
+        bank,
+        platform,
+        new AbortController().signal,
+      ),
+    ).resolves.toBe('retry');
+
+    expect(useBankStore.getState()).toMatchObject({
+      ledgerMode: 'read_only',
+      ledgerSyncError: 'server_copy_confirmation_required',
+      primaryCurrency: 'KZT',
+    });
+    expect(storage.has('cometa.bank.tma.user.41.ledger-authority-mode')).toBe(false);
+    expect(useBankStore.getState().approveServerCopy()).toBe(true);
+
+    await expect(
+      useBankStore.getState().synchronizeTelegramBank(
+        '41',
+        bank,
+        platform,
+        new AbortController().signal,
+      ),
+    ).resolves.toBe('applied');
+
+    expect(useBankStore.getState()).toMatchObject({
+      ledgerMode: 'server',
+      ledgerSyncError: null,
+      primaryCurrency: 'EUR',
+    });
+    expect(storage.get('cometa.bank.tma.user.41.ledger-authority-mode')).toContain('server');
+    expect(useBankStore.getState().approveServerCopy()).toBe(false);
+  });
+
+  it('still requires server-copy approval after a competing first import left only the sticky marker', async () => {
+    const local = exactBankState({
+      ...buildSeed(MIGRATION_NOW),
+      profile: { displayName: 'Ada', telegramId: '41' },
+    });
+    const server = exactBankState({ ...local, primaryCurrency: 'EUR' });
+    const storage = new Map<string, string>([
+      [
+        'cometa.bank.tma.user.41',
+        JSON.stringify({ schemaVersion: SCHEMA_VERSION, state: local }),
+      ],
+      [
+        'cometa.bank.tma.user.41.ledger-authority-mode',
+        JSON.stringify({ version: 1, mode: 'server', telegramId: '41' }),
+      ],
+    ]);
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => storage.set(key, value)),
+    });
+    const { useBankStore } = await importTelegramBankStore();
+    await expect(
+      useBankStore.getState().activateVerifiedTelegramSession('41'),
+    ).resolves.toBe(true);
+
+    await expect(
+      useBankStore.getState().synchronizeTelegramBank(
+        '41',
+        {
+          contractVersion: 1,
+          mode: 'server',
+          ...serverRevision(server, 1),
+        },
+        telegramPlatform(),
+        new AbortController().signal,
+      ),
+    ).resolves.toBe('retry');
+
+    expect(useBankStore.getState()).toMatchObject({
+      ledgerMode: 'read_only',
+      ledgerSyncError: 'server_copy_confirmation_required',
+      primaryCurrency: 'KZT',
+    });
+    expect(storage.has('cometa.bank.tma.user.41.ledger-authority-receipt')).toBe(false);
+    expect(useBankStore.getState().approveServerCopy()).toBe(true);
+  });
+
+  it('imports the first verified local snapshot and makes server mode sticky', async () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => storage.set(key, value)),
+    });
+    const { useBankStore } = await importTelegramBankStore();
+    await useBankStore.getState().activateVerifiedTelegramSession('41');
+    await useBankStore.getState().applyLaunchPreferences({
+      version: 1,
+      revisionEpoch: '9'.repeat(32),
+      revision: 1,
+      locale: 'en',
+      primaryCurrency: 'GEL',
+      displayName: 'Ada',
+      telegramId: '41',
+    });
+    const local = exactBankState({
+      ...exactBankState(useBankStore.getState()),
+      profile: { displayName: 'Ada', telegramId: '41' },
+    });
+    expect(local).toMatchObject({
+      primaryCurrency: 'GEL',
+      demoBaseCurrency: 'GEL',
+      fixtureId: 'synthetic-gel-v1',
+    });
+    const imported = { ...local, primaryCurrency: 'USD' as const };
+    const importBankState = vi.fn(async () => importResponse(imported, 1));
+
+    await expect(
+      useBankStore.getState().synchronizeTelegramBank(
+        '41',
+        { contractVersion: 1, mode: 'import_required', telegramId: '41' },
+        telegramPlatform(undefined, importBankState),
+        new AbortController().signal,
+      ),
+    ).resolves.toBe('applied');
+
+    expect(importBankState).toHaveBeenCalledWith(
+      expect.objectContaining({ version: 1, stateVersion: SCHEMA_VERSION, state: local }),
+      expect.any(AbortSignal),
+    );
+    expect(useBankStore.getState()).toMatchObject({
+      ledgerMode: 'server',
+      primaryCurrency: 'USD',
+      profile: { telegramId: '41' },
+    });
+    expect(storage.get('cometa.bank.tma.user.41.ledger-authority-mode')).toContain('server');
+    expect(storage.get('cometa.bank.tma.user.41.ledger-authority-receipt')).toContain(
+      '"revision":1',
+    );
+  });
+
+  it('adopts out-of-order command responses monotonically and rejects the retired epoch', async () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => storage.set(key, value)),
+    });
+    const { useBankStore } = await importTelegramBankStore();
+    await useBankStore.getState().activateVerifiedTelegramSession('41');
+    await useBankStore.getState().applyLaunchPreferences({
+      version: 1,
+      revisionEpoch: '9'.repeat(32),
+      revision: 1,
+      locale: 'en',
+      primaryCurrency: 'KZT',
+      displayName: 'Ada',
+      telegramId: '41',
+    });
+    const base = exactBankState(useBankStore.getState());
+    let releaseOlder: (value: BankCommandResponse) => void = () => undefined;
+    let releaseNewer: (value: BankCommandResponse) => void = () => undefined;
+    const older = new Promise<BankCommandResponse>((resolve) => {
+      releaseOlder = resolve;
+    });
+    const newer = new Promise<BankCommandResponse>((resolve) => {
+      releaseNewer = resolve;
+    });
+    const execute = vi.fn((command: { readonly kind: string; readonly currency?: string }) =>
+      command.currency === 'EUR' ? older : newer,
+    ) as PlatformAdapter['executeBankCommand'];
+    const platform = telegramPlatform(execute);
+    await useBankStore.getState().synchronizeTelegramBank(
+      '41',
+      {
+        contractVersion: 1,
+        mode: 'server',
+        ...serverRevision(base, 1),
+      },
+      platform,
+      new AbortController().signal,
+    );
+
+    const first = useBankStore.getState().setPrimaryCurrency('EUR');
+    const second = useBankStore.getState().setPrimaryCurrency('GEL');
+    releaseNewer(commandResponse({ ...base, primaryCurrency: 'GEL' }, 3));
+    await second;
+    releaseOlder(commandResponse({ ...base, primaryCurrency: 'EUR' }, 2));
+    await first;
+
+    expect(useBankStore.getState().primaryCurrency).toBe('GEL');
+    const nextEpochState = { ...base, primaryCurrency: 'USD' as const };
+    await expect(
+      useBankStore.getState().synchronizeTelegramBank(
+        '41',
+        {
+          contractVersion: 1,
+          mode: 'server',
+          ...serverRevision(nextEpochState, 1, {
+            revisionEpoch: 'b'.repeat(32),
+            digest: 'b'.repeat(64),
+          }),
+        },
+        platform,
+        new AbortController().signal,
+      ),
+    ).resolves.toBe('applied');
+    await expect(
+      useBankStore.getState().synchronizeTelegramBank(
+        '41',
+        { contractVersion: 1, mode: 'server', ...serverRevision(base, 99) },
+        platform,
+        new AbortController().signal,
+      ),
+    ).resolves.toBe('retry');
+    expect(useBankStore.getState().primaryCurrency).toBe('USD');
+  });
+
+  it('routes reset through the canonical server command without a fixture choice', async () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => storage.set(key, value)),
+    });
+    const { useBankStore } = await importTelegramBankStore();
+    await useBankStore.getState().activateVerifiedTelegramSession('41');
+    await useBankStore.getState().applyLaunchPreferences({
+      version: 1,
+      revisionEpoch: '9'.repeat(32),
+      revision: 1,
+      locale: 'en',
+      primaryCurrency: 'KZT',
+      displayName: 'Ada',
+      telegramId: '41',
+    });
+    const base = exactBankState(useBankStore.getState());
+    const rebuilt = exactBankState({ ...buildSeed(MIGRATION_NOW), profile: base.profile });
+    const execute = vi.fn(async () => commandResponse(rebuilt, 2));
+    await useBankStore.getState().synchronizeTelegramBank(
+      '41',
+      { contractVersion: 1, mode: 'server', ...serverRevision(base, 1) },
+      telegramPlatform(execute),
+      new AbortController().signal,
+    );
+
+    await useBankStore.getState().resetDemo();
+
+    expect(execute).toHaveBeenCalledWith(
+      { kind: 'reset_demo' },
+      expect.stringMatching(/^[0-9a-f]{32}$/),
+      undefined,
+    );
+    expect(useBankStore.getState()).toMatchObject({
+      ledgerMode: 'server',
+      primaryCurrency: 'KZT',
+      demoBaseCurrency: 'KZT',
+      fixtureId: 'owner-kzt-v1',
+    });
+  });
+
+  it('returns a typed account_closed rejection from a server transfer', async () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => storage.set(key, value)),
+    });
+    const { useBankStore } = await importTelegramBankStore();
+    const { TelegramApiRequestError } = await import('@/platform/bankApi');
+    await useBankStore.getState().activateVerifiedTelegramSession('41');
+    await useBankStore.getState().applyLaunchPreferences({
+      version: 1,
+      revisionEpoch: '9'.repeat(32),
+      revision: 1,
+      locale: 'en',
+      primaryCurrency: 'KZT',
+      displayName: 'Ada',
+      telegramId: '41',
+    });
+    const state = exactBankState(useBankStore.getState());
+    const execute = vi.fn(async () => {
+      throw new TelegramApiRequestError(422, 'account_closed');
+    });
+    await useBankStore.getState().synchronizeTelegramBank(
+      '41',
+      { contractVersion: 1, mode: 'server', ...serverRevision(state, 1) },
+      telegramPlatform(execute),
+      new AbortController().signal,
+    );
+    const contact = state.contacts[0];
+    if (contact === undefined) throw new Error('Seed fixture has no contact');
+
+    const outcome = await useBankStore.getState().transfer({
+      fromAccountId: CHECKING_ID,
+      toContactId: contact.id,
+      amountMinor: 100,
+      clientTransferId: 'ct_server_account_closed',
+    });
+
+    expect(outcome).toEqual({ ok: false, error: 'account_closed' });
+  });
+
+  it('reconciles stale transfer sheets after bootstrap, command, and rate-state adoption', async () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => storage.set(key, value)),
+    });
+    const { useBankStore } = await importTelegramBankStore();
+    const { useUiStore } = await import('./uiStore');
+    await useBankStore.getState().activateVerifiedTelegramSession('41');
+    await useBankStore.getState().applyLaunchPreferences({
+      version: 1,
+      revisionEpoch: '9'.repeat(32),
+      revision: 1,
+      locale: 'en',
+      primaryCurrency: 'KZT',
+      displayName: 'Ada',
+      telegramId: '41',
+    });
+    const base = exactBankState(useBankStore.getState());
+    const first = applyAddAccount(base, {
+      accountId: 'acc_thb_ui_reconcile',
+      currency: 'THB',
+      name: 'Thailand',
+      number: 'CM05THB000000000005',
+      nowISO: new Date().toISOString(),
+    });
+    if (!first.ok) throw new Error(`First account fixture failed: ${first.error}`);
+    const second = applyAddAccount(first.state, {
+      accountId: 'acc_vnd_ui_reconcile',
+      currency: 'VND',
+      name: 'Vietnam',
+      number: 'CM06VND000000000006',
+      nowISO: new Date().toISOString(),
+    });
+    if (!second.ok) throw new Error(`Second account fixture failed: ${second.error}`);
+    const commandState = { ...second.state, primaryCurrency: 'USD' as const };
+    const third = applyAddAccount(commandState, {
+      accountId: 'acc_rub_ui_reconcile',
+      currency: 'RUB',
+      name: 'Russia',
+      number: 'CM07RUB000000000007',
+      nowISO: new Date().toISOString(),
+    });
+    if (!third.ok) throw new Error(`Third account fixture failed: ${third.error}`);
+    const rateState = withFreshRates(third.state, new Date().toISOString());
+    const execute = vi.fn(async () => commandResponse(commandState, 2));
+    const refresh = vi.fn(async () => ratesResponse(rateState, 3, true));
+    const platform = telegramPlatform(execute, undefined, refresh);
+
+    useUiStore.setState({ sheet: { kind: 'transferOwn' } });
+    await useBankStore.getState().synchronizeTelegramBank(
+      '41',
+      { contractVersion: 1, mode: 'server', ...serverRevision(first.state, 1) },
+      platform,
+      new AbortController().signal,
+    );
+    expect(useUiStore.getState().sheet).toBeNull();
+
+    useUiStore.setState({ sheet: { kind: 'transferOwn' } });
+    await useBankStore.getState().setPrimaryCurrency('USD');
+    expect(useUiStore.getState().sheet).toBeNull();
+
+    useUiStore.setState({ sheet: { kind: 'transferContact' } });
+    await expect(useBankStore.getState().refreshRates(true)).resolves.toBe('updated');
+    expect(useUiStore.getState().sheet).toBeNull();
+  });
+
+  it('fails closed when a sticky server user receives a bootstrap without the bank API', async () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => storage.set(key, value)),
+    });
+    const { useBankStore, ServerLedgerReadOnlyError } = await importTelegramBankStore();
+    await useBankStore.getState().activateVerifiedTelegramSession('41');
+    await useBankStore.getState().applyLaunchPreferences({
+      version: 1,
+      revisionEpoch: '9'.repeat(32),
+      revision: 1,
+      locale: 'en',
+      primaryCurrency: 'KZT',
+      displayName: 'Ada',
+      telegramId: '41',
+    });
+    const server = exactBankState(useBankStore.getState());
+    const platform = telegramPlatform();
+    await useBankStore.getState().synchronizeTelegramBank(
+      '41',
+      { contractVersion: 1, mode: 'server', ...serverRevision(server, 1) },
+      platform,
+      new AbortController().signal,
+    );
+    const before = useBankStore.getState().primaryCurrency;
+
+    await expect(
+      useBankStore.getState().synchronizeTelegramBank(
+        '41',
+        undefined,
+        platform,
+        new AbortController().signal,
+      ),
+    ).resolves.toBe('retry');
+    await expect(useBankStore.getState().setPrimaryCurrency('EUR')).rejects.toBeInstanceOf(
+      ServerLedgerReadOnlyError,
+    );
+    expect(useBankStore.getState()).toMatchObject({
+      ledgerMode: 'read_only',
+      primaryCurrency: before,
+    });
+  });
+
+  it('refreshes canonical rates through the server without a browser provider request', async () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => storage.set(key, value)),
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse()));
+    const { useBankStore } = await importTelegramBankStore();
+    await useBankStore.getState().activateVerifiedTelegramSession('41');
+    await useBankStore.getState().applyLaunchPreferences({
+      version: 1,
+      revisionEpoch: '9'.repeat(32),
+      revision: 1,
+      locale: 'en',
+      primaryCurrency: 'KZT',
+      displayName: 'Ada',
+      telegramId: '41',
+    });
+    const state = exactBankState(useBankStore.getState());
+    const live = withFreshRates(state, new Date().toISOString());
+    const refreshBankRates = vi
+      .fn()
+      .mockResolvedValueOnce(ratesResponse(live, 2, true))
+      .mockResolvedValueOnce(ratesResponse(live, 2, false));
+    await useBankStore.getState().synchronizeTelegramBank(
+      '41',
+      { contractVersion: 1, mode: 'server', ...serverRevision(state, 1) },
+      telegramPlatform(undefined, undefined, refreshBankRates),
+      new AbortController().signal,
+    );
+    await expect(useBankStore.getState().refreshRates(true)).resolves.toBe('updated');
+    await expect(useBankStore.getState().refreshRates(true)).resolves.toBe('cached');
+
+    expect(useBankStore.getState().exchangeRates).toEqual(live.exchangeRates);
+    expect(refreshBankRates).toHaveBeenCalledTimes(2);
+    expect(refreshBankRates).toHaveBeenCalledWith(
+      expect.stringMatching(/^[0-9a-f]{32}$/),
+      undefined,
+    );
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('preserves the canonical rate snapshot when the server provider fails', async () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => storage.set(key, value)),
+    });
+    const browserFetch = vi.fn(async () => okResponse());
+    vi.stubGlobal('fetch', browserFetch);
+    const { useBankStore } = await importTelegramBankStore();
+    await useBankStore.getState().activateVerifiedTelegramSession('41');
+    await useBankStore.getState().applyLaunchPreferences({
+      version: 1,
+      revisionEpoch: '9'.repeat(32),
+      revision: 1,
+      locale: 'en',
+      primaryCurrency: 'KZT',
+      displayName: 'Ada',
+      telegramId: '41',
+    });
+    const state = exactBankState(useBankStore.getState());
+    const refreshBankRates = vi.fn(async () => {
+      const { TelegramApiRequestError } = await import('@/platform/bankApi');
+      throw new TelegramApiRequestError(503, 'bank_rates_unavailable');
+    });
+    await useBankStore.getState().synchronizeTelegramBank(
+      '41',
+      { contractVersion: 1, mode: 'server', ...serverRevision(state, 1) },
+      telegramPlatform(undefined, undefined, refreshBankRates),
+      new AbortController().signal,
+    );
+    const before = useBankStore.getState().exchangeRates;
+
+    await expect(useBankStore.getState().refreshRates(true)).resolves.toBe('failed');
+
+    expect(useBankStore.getState()).toMatchObject({
+      ratesStatus: 'error',
+      ledgerMode: 'server',
+      ledgerSyncError: 'bank_rates_unavailable',
+    });
+    expect(useBankStore.getState().exchangeRates).toBe(before);
+    expect(browserFetch).not.toHaveBeenCalled();
+  });
+
+  it('does not let a delayed rate response replace a newer canonical revision', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(`${TODAY}T12:00:00.000Z`);
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => storage.set(key, value)),
+    });
+    const { useBankStore } = await importTelegramBankStore();
+    await useBankStore.getState().activateVerifiedTelegramSession('41');
+    await useBankStore.getState().applyLaunchPreferences({
+      version: 1,
+      revisionEpoch: '9'.repeat(32),
+      revision: 1,
+      locale: 'en',
+      primaryCurrency: 'KZT',
+      displayName: 'Ada',
+      telegramId: '41',
+    });
+    const base = exactBankState(useBankStore.getState());
+    const delayedState = withFreshRates(base, `${TODAY}T10:00:00.000Z`);
+    const newestState = {
+      ...withFreshRates(base, `${TODAY}T11:00:00.000Z`),
+      primaryCurrency: 'EUR' as const,
+    };
+    const delayed = deferred<BankRatesRefreshResponse>();
+    const refreshBankRates = vi.fn(() => delayed.promise);
+    const executeBankCommand = vi.fn(async () => commandResponse(newestState, 3));
+    await useBankStore.getState().synchronizeTelegramBank(
+      '41',
+      { contractVersion: 1, mode: 'server', ...serverRevision(base, 1) },
+      telegramPlatform(executeBankCommand, undefined, refreshBankRates),
+      new AbortController().signal,
+    );
+
+    const refresh = useBankStore.getState().refreshRates(true);
+    await vi.waitFor(() => expect(refreshBankRates).toHaveBeenCalledOnce());
+    await useBankStore.getState().setPrimaryCurrency('EUR');
+    delayed.resolve(ratesResponse(delayedState, 2, true));
+
+    await expect(refresh).resolves.toBe('updated');
+    expect(useBankStore.getState()).toMatchObject({
+      primaryCurrency: 'EUR',
+      exchangeRates: newestState.exchangeRates,
+      ratesStatus: 'fresh',
+    });
+  });
+
+  it('keeps canonical snapshots isolated when Telegram users switch', async () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => storage.set(key, value)),
+    });
+    const { useBankStore } = await importTelegramBankStore();
+    const platform = telegramPlatform();
+    await useBankStore.getState().activateVerifiedTelegramSession('41');
+    await useBankStore.getState().applyLaunchPreferences({
+      version: 1,
+      revisionEpoch: '9'.repeat(32),
+      revision: 1,
+      locale: 'en',
+      primaryCurrency: 'KZT',
+      displayName: 'Ada',
+      telegramId: '41',
+    });
+    const stateA = {
+      ...exactBankState(useBankStore.getState()),
+      primaryCurrency: 'EUR' as const,
+    };
+    await useBankStore.getState().synchronizeTelegramBank(
+      '41',
+      { contractVersion: 1, mode: 'server', ...serverRevision(stateA, 1) },
+      platform,
+      new AbortController().signal,
+    );
+
+    await useBankStore.getState().isolateTelegramSession('42');
+    await useBankStore.getState().activateVerifiedTelegramSession('42');
+    await useBankStore.getState().applyLaunchPreferences({
+      version: 1,
+      revisionEpoch: '9'.repeat(32),
+      revision: 1,
+      locale: 'ru',
+      primaryCurrency: 'GEL',
+      displayName: 'Grace',
+      telegramId: '42',
+    });
+    const stateB = {
+      ...exactBankState(useBankStore.getState()),
+      primaryCurrency: 'GEL' as const,
+    };
+    await useBankStore.getState().synchronizeTelegramBank(
+      '42',
+      { contractVersion: 1, mode: 'server', ...serverRevision(stateB, 1) },
+      platform,
+      new AbortController().signal,
+    );
+
+    expect(useBankStore.getState()).toMatchObject({
+      primaryCurrency: 'GEL',
+      profile: { telegramId: '42' },
+    });
+    expect(storage.get('cometa.bank.tma.user.41')).toContain('"primaryCurrency":"EUR"');
+    expect(storage.get('cometa.bank.tma.user.42')).toContain('"primaryCurrency":"GEL"');
+  });
+
+  it('does not spend a server operation when bootstrap already materialized today', async () => {
+    const nowISO = '2026-09-06T12:00:00.000Z';
+    vi.useFakeTimers();
+    vi.setSystemTime(nowISO);
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => storage.set(key, value)),
+    });
+    const { useBankStore } = await importTelegramBankStore();
+    await useBankStore.getState().activateVerifiedTelegramSession('41');
+    const canonical = exactBankState({
+      ...buildSeed(nowISO),
+      accounts: buildSeed(nowISO).accounts.map((account) =>
+        account.type === 'savings' ? { ...account, accrualAnchor: nowISO } : account,
+      ),
+      profile: { displayName: 'Ada', telegramId: '41' },
+    });
+    const executeBankCommand = vi.fn(async () => {
+      throw new Error('settlement must not be requested');
+    });
+
+    await useBankStore.getState().synchronizeTelegramBank(
+      '41',
+      { contractVersion: 1, mode: 'server', ...serverRevision(canonical, 1) },
+      telegramPlatform(executeBankCommand),
+      new AbortController().signal,
+    );
+    await useBankStore.getState().settleNow();
+    await useBankStore.getState().settleNow();
+
+    expect(executeBankCommand).not.toHaveBeenCalled();
+  });
+
+  it('does not retry an impossible positive-interest settlement at the server row ceiling', async () => {
+    const nowISO = '2026-09-06T12:00:00.000Z';
+    const createdAt = '2026-09-05T12:00:00.000Z';
+    vi.useFakeTimers();
+    vi.setSystemTime(nowISO);
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => storage.set(key, value)),
+    });
+    const { useBankStore } = await importTelegramBankStore();
+    await useBankStore.getState().activateVerifiedTelegramSession('41');
+    const capped = exactBankState({
+      ...padTransactions(buildSeed(createdAt), 5_000, createdAt),
+      profile: { displayName: 'Ada', telegramId: '41' },
+    });
+    const anchorBefore = capped.accounts.find((account) => account.type === 'savings')
+      ?.accrualAnchor;
+    const executeBankCommand = vi.fn(async () => {
+      throw new Error('impossible settlement must stay client-side');
+    });
+
+    await useBankStore.getState().synchronizeTelegramBank(
+      '41',
+      { contractVersion: 1, mode: 'server', ...serverRevision(capped, 1) },
+      telegramPlatform(executeBankCommand),
+      new AbortController().signal,
+    );
+    await useBankStore.getState().settleNow();
+    await useBankStore.getState().settleNow();
+
+    expect(executeBankCommand).not.toHaveBeenCalled();
+    expect(useBankStore.getState().transactions).toHaveLength(5_000);
+    expect(useBankStore.getState().accounts.find((account) => account.type === 'savings')
+      ?.accrualAnchor).toBe(anchorBefore);
+    expect(useBankStore.getState().ledgerSyncError).toBeNull();
+  });
+
+  it('settles a due first import once and skips the next same-day preflight', async () => {
+    const nowISO = '2026-09-06T12:00:00.000Z';
+    vi.useFakeTimers();
+    vi.setSystemTime(nowISO);
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => storage.set(key, value)),
+    });
+    const { useBankStore } = await importTelegramBankStore();
+    await useBankStore.getState().activateVerifiedTelegramSession('41');
+    await useBankStore.getState().applyLaunchPreferences({
+      version: 1,
+      revisionEpoch: '9'.repeat(32),
+      revision: 1,
+      locale: 'en',
+      primaryCurrency: 'KZT',
+      displayName: 'Ada',
+      telegramId: '41',
+    });
+    const imported = exactBankState({
+      ...useBankStore.getState(),
+      accounts: useBankStore.getState().accounts.map((account) =>
+        account.type === 'savings'
+          ? { ...account, accrualAnchor: '2026-09-05T23:59:59.999Z' }
+          : account,
+      ),
+    });
+    const settlement = applySettleAllWithinTransactionLimit(imported, nowISO);
+    expect(settlement).toMatchObject({ applied: true, capacityReached: false });
+    const importBankState = vi.fn(async () => importResponse(imported, 1));
+    const executeBankCommand = vi.fn(async () => commandResponse(settlement.state, 2));
+
+    await useBankStore.getState().synchronizeTelegramBank(
+      '41',
+      { contractVersion: 1, mode: 'import_required', telegramId: '41' },
+      telegramPlatform(executeBankCommand, importBankState),
+      new AbortController().signal,
+    );
+    await useBankStore.getState().settleNow();
+    await useBankStore.getState().settleNow();
+
+    expect(executeBankCommand).toHaveBeenCalledOnce();
+    expect(executeBankCommand).toHaveBeenCalledWith(
+      { kind: 'settle' },
+      expect.stringMatching(/^[0-9a-f]{32}$/),
+      undefined,
+    );
+    expect(useBankStore.getState().accounts.find((account) => account.type === 'savings'))
+      .toMatchObject({ accrualAnchor: nowISO });
+  });
+
+  it('single-flights a recurrence-only UTC rollover and then becomes a no-op', async () => {
+    const initialISO = '2026-09-06T12:00:00.000Z';
+    const dueISO = '2026-09-30T12:00:00.000Z';
+    vi.useFakeTimers();
+    vi.setSystemTime(initialISO);
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => storage.set(key, value)),
+    });
+    const { useBankStore } = await importTelegramBankStore();
+    await useBankStore.getState().activateVerifiedTelegramSession('41');
+    let fixture = exactBankState({
+      ...buildSeed(initialISO),
+      accounts: buildSeed(initialISO).accounts.map((account) =>
+        account.type === 'savings' ? { ...account, accrualAnchor: initialISO } : account,
+      ),
+      profile: { displayName: 'Ada', telegramId: '41' },
+    });
+    const savings = fixture.accounts.find((account) => account.type === 'savings');
+    if (savings === undefined) throw new Error('Missing savings fixture');
+    const zeroed = applyBalanceAdjustment(fixture, {
+      accountId: savings.id,
+      targetAmountInput: '0',
+      locale: 'en',
+      nowISO: initialISO,
+    });
+    if (!zeroed.ok) throw new Error(zeroed.error);
+    const closed = applyCloseAccount(zeroed.state, savings.id, initialISO);
+    if (!closed.ok) throw new Error(closed.error);
+    const created = createRecurringRule(closed.state, {
+      ruleId: 'rr_rollover_income',
+      accountId: CHECKING_ID,
+      direction: 'income',
+      amountInput: '1000',
+      locale: 'en',
+      counterparty: 'Monthly retainer',
+      startYear: 2026,
+      startMonth: 9,
+      anchorDay: 30,
+      nowISO: initialISO,
+    });
+    if (!created.ok) throw new Error(created.error);
+    fixture = exactBankState(created.state);
+    expect(fixture.recurringRules[0]?.nextOccurrence).toBe('2026-09-30');
+    const materialized = materializeRecurringRules(fixture, dueISO).state;
+    const response = deferred<BankCommandResponse>();
+    const executeBankCommand = vi.fn(() => response.promise) as PlatformAdapter['executeBankCommand'];
+
+    await useBankStore.getState().synchronizeTelegramBank(
+      '41',
+      { contractVersion: 1, mode: 'server', ...serverRevision(fixture, 1) },
+      telegramPlatform(executeBankCommand),
+      new AbortController().signal,
+    );
+    await useBankStore.getState().settleNow();
+    expect(executeBankCommand).not.toHaveBeenCalled();
+
+    vi.setSystemTime(dueISO);
+    const first = useBankStore.getState().settleNow();
+    const second = useBankStore.getState().settleNow();
+    await vi.waitFor(() => expect(executeBankCommand).toHaveBeenCalledOnce());
+    response.resolve(commandResponse(materialized, 2));
+    await Promise.all([first, second]);
+    await useBankStore.getState().settleNow();
+
+    expect(executeBankCommand).toHaveBeenCalledOnce();
+    expect(useBankStore.getState().recurringRules[0]?.nextOccurrence).toBe('2026-10-30');
+  });
+
+  it('quarantines the visible old-user ledger when a deferred command detects a Telegram session change', async () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => storage.set(key, value)),
+    });
+    const { useBankStore } = await importTelegramBankStore();
+    const { TelegramApiRequestError } = await import('@/platform/bankApi');
+    await useBankStore.getState().activateVerifiedTelegramSession('41');
+    await useBankStore.getState().applyLaunchPreferences({
+      version: 1,
+      revisionEpoch: '9'.repeat(32),
+      revision: 1,
+      locale: 'en',
+      primaryCurrency: 'GEL',
+      displayName: 'Old user',
+      telegramId: '41',
+    });
+    const oldUserState = exactBankState({
+      ...buildSeed(MIGRATION_NOW, 'GEL'),
+      profile: { displayName: 'Old user', telegramId: '41' },
+    });
+    const response = deferred<BankCommandResponse>();
+    const executeBankCommand = vi.fn(() => response.promise) as PlatformAdapter['executeBankCommand'];
+    await useBankStore.getState().synchronizeTelegramBank(
+      '41',
+      { contractVersion: 1, mode: 'server', ...serverRevision(oldUserState, 1) },
+      telegramPlatform(executeBankCommand),
+      new AbortController().signal,
+    );
+    expect(useBankStore.getState()).toMatchObject({
+      ledgerMode: 'server',
+      fixtureId: 'synthetic-gel-v1',
+      profile: { telegramId: '41' },
+    });
+
+    const command = useBankStore.getState().setPrimaryCurrency('USD');
+    await vi.waitFor(() => expect(executeBankCommand).toHaveBeenCalledOnce());
+    response.reject(new TelegramApiRequestError(425, 'telegram_session_changed'));
+
+    await expect(command).rejects.toMatchObject({ code: 'telegram_session_changed' });
+    expect(useBankStore.getState()).toMatchObject({
+      ledgerMode: 'read_only',
+      ledgerSyncError: 'telegram_session_changed',
+      fixtureId: 'owner-kzt-v1',
+      profile: { displayName: 'Никита' },
+    });
+    expect(useBankStore.getState().profile.telegramId).toBeUndefined();
+    expect(exactBankState(useBankStore.getState())).not.toEqual(oldUserState);
+    expect((await import('./persistence')).getActiveTelegramPersistenceId()).toBeUndefined();
+  });
+
+  it('quarantines the visible old-user ledger when a deferred import detects a Telegram session change', async () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => storage.set(key, value)),
+    });
+    const { useBankStore } = await importTelegramBankStore();
+    const { TelegramApiRequestError } = await import('@/platform/bankApi');
+    await useBankStore.getState().activateVerifiedTelegramSession('41');
+    await useBankStore.getState().applyLaunchPreferences({
+      version: 1,
+      revisionEpoch: '9'.repeat(32),
+      revision: 1,
+      locale: 'en',
+      primaryCurrency: 'GEL',
+      displayName: 'Old user',
+      telegramId: '41',
+    });
+    const oldUserState = exactBankState(useBankStore.getState());
+    const response = deferred<BankImportResponse>();
+    const importBankState = vi.fn(() => response.promise) as PlatformAdapter['importBankState'];
+
+    const synchronization = useBankStore.getState().synchronizeTelegramBank(
+      '41',
+      { contractVersion: 1, mode: 'import_required', telegramId: '41' },
+      telegramPlatform(undefined, importBankState),
+      new AbortController().signal,
+    );
+    await vi.waitFor(() => expect(importBankState).toHaveBeenCalledOnce());
+    response.reject(new TelegramApiRequestError(425, 'telegram_session_changed'));
+
+    await expect(synchronization).rejects.toMatchObject({ code: 'telegram_session_changed' });
+    expect(useBankStore.getState()).toMatchObject({
+      ledgerMode: 'read_only',
+      ledgerSyncError: 'telegram_session_changed',
+      fixtureId: 'owner-kzt-v1',
+      profile: { displayName: 'Никита' },
+    });
+    expect(useBankStore.getState().profile.telegramId).toBeUndefined();
+    expect(exactBankState(useBankStore.getState())).not.toEqual(oldUserState);
+    expect((await import('./persistence')).getActiveTelegramPersistenceId()).toBeUndefined();
+  });
+});
+
+describe('useBankStore bounded domain mutations', () => {
+  it('keeps an exact-cap ledger valid when local settlement is due, then reset remains available', async () => {
+    const createdAt = '2026-09-02T12:00:00.000Z';
+    const nowISO = '2026-09-05T12:00:00.000Z';
+    vi.useFakeTimers();
+    vi.setSystemTime(nowISO);
+    const full = padTransactions(buildSeed(createdAt), 5_000, createdAt);
+    const anchorBefore = full.accounts.find((account) => account.type === 'savings')
+      ?.accrualAnchor;
+    const storage = new Map<string, string>([
+      ['cometa.bank', JSON.stringify({ schemaVersion: SCHEMA_VERSION, state: full })],
+    ]);
+    const setItem = vi.fn((key: string, value: string) => storage.set(key, value));
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem,
+    });
+    vi.stubGlobal('navigator', {});
+
+    const { useBankStore } = await import('./bankStore');
+    await expect(useBankStore.getState().settleNow()).resolves.toBeUndefined();
+
+    const deferred = exactBankState(useBankStore.getState());
+    expect(deferred.transactions).toHaveLength(5_000);
+    expect(deferred.accounts.find((account) => account.type === 'savings')
+      ?.accrualAnchor).toBe(anchorBefore);
+    expect(setItem).not.toHaveBeenCalled();
+
+    await expect(useBankStore.getState().resetDemo()).resolves.toBeUndefined();
+    expect(useBankStore.getState().transactions.length).toBeLessThan(5_000);
+    expect(exactBankState(useBankStore.getState())).toMatchObject({
+      demoBaseCurrency: full.demoBaseCurrency,
+      fixtureId: full.fixtureId,
+    });
+    expect(setItem).toHaveBeenCalledOnce();
+  });
+
+  it('rejects exact-cap local contact and own-account transfers without persistence', async () => {
+    const nowISO = '2026-09-05T12:00:00.000Z';
+    vi.useFakeTimers();
+    vi.setSystemTime(nowISO);
+    const full = padTransactions(buildSeed(nowISO), 5_000, nowISO);
+    const storage = new Map<string, string>([
+      ['cometa.bank', JSON.stringify({ schemaVersion: SCHEMA_VERSION, state: full })],
+    ]);
+    const setItem = vi.fn((key: string, value: string) => storage.set(key, value));
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem,
+    });
+    vi.stubGlobal('navigator', {});
+
+    const { useBankStore } = await import('./bankStore');
+    const state = useBankStore.getState();
+    const checking = state.accounts.find((account) => account.role === 'primary-checking');
+    const usd = state.accounts.find((account) => account.role === 'companion-1');
+    const contact = state.contacts[0];
+    if (checking === undefined || usd === undefined || contact === undefined) {
+      throw new Error('Missing transfer fixture');
+    }
+
+    await expect(state.transfer({
+      fromAccountId: checking.id,
+      toContactId: contact.id,
+      amountMinor: 100,
+      clientTransferId: 'ct_exact_cap_contact',
+    })).resolves.toEqual({ ok: false, error: 'capacity' });
+    await expect(useBankStore.getState().transfer({
+      fromAccountId: checking.id,
+      toAccountId: usd.id,
+      amountMinor: 46_227,
+      clientTransferId: 'ct_exact_cap_own',
+    })).resolves.toEqual({ ok: false, error: 'capacity' });
+
+    expect(useBankStore.getState().transactions).toHaveLength(5_000);
+    expect(useBankStore.getState().recentTransferIds).not.toContain('ct_exact_cap_contact');
+    expect(useBankStore.getState().recentTransferIds).not.toContain('ct_exact_cap_own');
+    expect(setItem).not.toHaveBeenCalled();
+    expect(exactBankState(useBankStore.getState()).transactions).toHaveLength(5_000);
+  });
+
+  it('does not unfreeze a closed-account card through the local store action', async () => {
+    const nowISO = '2026-09-05T12:00:00.000Z';
+    vi.useFakeTimers();
+    vi.setSystemTime(nowISO);
+    const seed = buildSeed(nowISO);
+    const account = seed.accounts.find((candidate) => candidate.role === 'primary-checking');
+    if (account === undefined) throw new Error('Missing primary checking account');
+    const zeroed = applyBalanceAdjustment(seed, {
+      accountId: account.id,
+      targetAmountInput: '0',
+      locale: 'en',
+      nowISO,
+    });
+    if (!zeroed.ok) throw new Error(zeroed.error);
+    const closed = applyCloseAccount(zeroed.state, account.id, nowISO);
+    if (!closed.ok) throw new Error(closed.error);
+    const card = closed.state.cards.find((candidate) => candidate.accountId === account.id);
+    if (card === undefined) throw new Error('Missing account card');
+    expect(card).toMatchObject({ status: 'frozen', freezeReason: 'account_closed' });
+
+    const storage = new Map<string, string>([
+      ['cometa.bank', JSON.stringify({ schemaVersion: SCHEMA_VERSION, state: closed.state })],
+    ]);
+    const setItem = vi.fn((key: string, value: string) => storage.set(key, value));
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem,
+    });
+    vi.stubGlobal('navigator', {});
+
+    const { useBankStore } = await import('./bankStore');
+    await expect(useBankStore.getState().toggleCardFreeze(card.id)).resolves.toBeUndefined();
+
+    expect(useBankStore.getState().cards.find((candidate) => candidate.id === card.id))
+      .toMatchObject({ status: 'frozen', freezeReason: 'account_closed' });
+    expect(exactBankState(useBankStore.getState())).not.toBeNull();
+    expect(setItem).not.toHaveBeenCalled();
+  });
+});
+
 describe('useBankStore exchange rates', () => {
   it('updates the primary display currency without changing account currencies', async () => {
     const { useBankStore } = await import('./bankStore');
@@ -166,6 +1341,10 @@ describe('useBankStore exchange rates', () => {
     await useBankStore.getState().setPrimaryCurrency('GEL');
 
     expect(useBankStore.getState().primaryCurrency).toBe('GEL');
+    expect(useBankStore.getState()).toMatchObject({
+      demoBaseCurrency: 'KZT',
+      fixtureId: 'owner-kzt-v1',
+    });
     expect(useBankStore.getState().accounts.map((account) => account.currency)).toEqual(before);
   });
 
@@ -194,6 +1373,8 @@ describe('useBankStore exchange rates', () => {
 
     expect(useBankStore.getState()).toMatchObject({
       primaryCurrency: 'GEL',
+      demoBaseCurrency: 'KZT',
+      fixtureId: 'owner-kzt-v1',
       profile: { displayName: 'Ada Lovelace', telegramId: '9007199254740993' },
     });
     expect(useBankStore.getState().transactions).toEqual(ledgerBefore);
@@ -404,6 +1585,63 @@ describe('useBankStore exchange rates', () => {
     expect(useBankStore.getState().profile).toEqual(state.profile);
   });
 
+  it('preserves UI on the same verified namespace and resets only when the namespace changes', async () => {
+    const state = {
+      ...buildSeed(new Date().toISOString()),
+      profile: { displayName: 'Current user', telegramId: '42' },
+    };
+    const storage = new Map<string, string>([
+      [
+        'cometa.bank.tma.user.42',
+        JSON.stringify({ schemaVersion: SCHEMA_VERSION, state }),
+      ],
+      ['cometa.bank.tma.user.42.locale', 'en'],
+    ]);
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => storage.set(key, value)),
+    });
+    const { useBankStore } = await importTelegramBankStore();
+    const { useUiStore } = await import('./uiStore');
+
+    await expect(
+      useBankStore.getState().activateVerifiedTelegramSession('42'),
+    ).resolves.toBe(true);
+    const selected = state.accounts.find((account) => account.role === 'companion-1');
+    if (selected === undefined) throw new Error('Seed fixture has no companion account');
+    useUiStore.setState({
+      locale: 'en',
+      screen: 'home',
+      activeAccountId: selected.id,
+      sheet: { kind: 'transferOwn' },
+    });
+    useUiStore.getState().showToast('settings.reset.done');
+
+    await expect(useBankStore.getState().isolateTelegramSession('42')).resolves.toBe(true);
+    await expect(
+      useBankStore.getState().activateVerifiedTelegramSession('42'),
+    ).resolves.toBe(true);
+    expect(useUiStore.getState()).toMatchObject({
+      locale: 'en',
+      screen: 'home',
+      activeAccountId: selected.id,
+      sheet: { kind: 'transferOwn' },
+      toast: { key: 'settings.reset.done' },
+    });
+
+    await expect(
+      useBankStore.getState().isolateTelegramSession(undefined),
+    ).resolves.toBe(false);
+    expect(useUiStore.getState()).toMatchObject({
+      locale: 'ru',
+      screen: 'home',
+      activeAccountId: CHECKING_ID,
+      sheet: null,
+      toast: null,
+      toastQueue: [],
+    });
+  });
+
   it('preserves a dirty same-ID mutation across verified bootstrap and retries its save', async () => {
     const nowISO = new Date().toISOString();
     const state = {
@@ -461,9 +1699,9 @@ describe('useBankStore exchange rates', () => {
     expect(saved.state?.cards[0]?.status).toBe('frozen');
   });
 
-  it('preserves Telegram currency and profile through resetDemo', async () => {
+  it('preserves reporting currency, profile, and fixture identity through resetDemo', async () => {
     const storage = new Map<string, string>();
-    const seed = buildSeed(new Date().toISOString());
+    const seed = buildSeed(new Date().toISOString(), 'GEL');
     storage.set('cometa.bank', JSON.stringify({ schemaVersion: SCHEMA_VERSION, state: seed }));
     vi.stubGlobal('localStorage', {
       getItem: vi.fn((key: string) => storage.get(key) ?? null),
@@ -475,7 +1713,7 @@ describe('useBankStore exchange rates', () => {
       revisionEpoch: '0123456789abcdef0123456789abcdef',
       revision: 3,
       locale: 'en' as const,
-      primaryCurrency: 'GEL' as const,
+      primaryCurrency: 'USD' as const,
       displayName: 'Ada Lovelace',
       telegramId: '9007199254740993',
     };
@@ -483,10 +1721,44 @@ describe('useBankStore exchange rates', () => {
     await useBankStore.getState().applyLaunchPreferences(preferences);
     await useBankStore.getState().resetDemo();
 
-    expect(useBankStore.getState().primaryCurrency).toBe('GEL');
+    expect(useBankStore.getState()).toMatchObject({
+      primaryCurrency: 'USD',
+      demoBaseCurrency: 'GEL',
+      fixtureId: 'synthetic-gel-v1',
+    });
     expect(useBankStore.getState().profile).toEqual({
       displayName: 'Ada Lovelace',
       telegramId: '9007199254740993',
+    });
+  });
+
+  it('settles current savings interest while rebuilding a local fixture', async () => {
+    const initialAt = '2026-09-02T12:00:00.000Z';
+    const resetAt = '2026-09-05T12:00:00.000Z';
+    vi.useFakeTimers();
+    vi.setSystemTime(resetAt);
+    const initial = buildSeed(initialAt);
+    const storage = new Map<string, string>([
+      ['cometa.bank', JSON.stringify({ schemaVersion: SCHEMA_VERSION, state: initial })],
+    ]);
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => storage.set(key, value)),
+    });
+    vi.stubGlobal('navigator', {});
+
+    const { useBankStore } = await import('./bankStore');
+    const beforeCount = useBankStore.getState().transactions.length;
+    await useBankStore.getState().resetDemo();
+
+    const reset = useBankStore.getState();
+    const savings = reset.accounts.find((account) => account.role === 'primary-savings');
+    expect(savings?.accrualAnchor).toBe(resetAt);
+    expect(reset.transactions).toHaveLength(beforeCount + 1);
+    expect(reset.transactions.at(-1)).toMatchObject({
+      accountId: savings?.id,
+      kind: 'interest',
+      createdAt: resetAt,
     });
   });
 

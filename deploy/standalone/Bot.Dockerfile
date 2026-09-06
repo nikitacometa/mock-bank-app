@@ -4,10 +4,12 @@ FROM node:22.23.2-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b8
 
 WORKDIR /app
 RUN corepack enable
-COPY package.json pnpm-lock.yaml tsconfig.bot.json ./
+COPY package.json pnpm-lock.yaml tsconfig.bot.json vite.bot.config.ts ./
 RUN pnpm install --frozen-lockfile
 COPY bot ./bot
-RUN pnpm exec tsc -p tsconfig.bot.json --pretty false
+COPY src ./src
+COPY scripts/check-bot-bundle.mjs ./scripts/check-bot-bundle.mjs
+RUN pnpm build:bot
 
 FROM node:22.23.2-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS runtime
 

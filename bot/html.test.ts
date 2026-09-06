@@ -13,9 +13,10 @@ describe('normalizeDisplayName', () => {
     expect(normalizeDisplayName('  Ada\u00a0  Lovelace  ')).toBe('Ada Lovelace');
   });
 
-  it('rejects control characters, empty names, and names over 48 code points', () => {
+  it('rejects control, format, surrogate characters, empty names, and names over 48 code points', () => {
     expect(normalizeDisplayName('Ada\nLovelace')).toBeNull();
     expect(normalizeDisplayName('zero\u200bwidth')).toBeNull();
+    expect(normalizeDisplayName('Ada\ud800Lovelace')).toBeNull();
     expect(normalizeDisplayName('   ')).toBeNull();
     expect(normalizeDisplayName('x'.repeat(49))).toBeNull();
     expect(normalizeDisplayName('🙂'.repeat(48))).toBe('🙂'.repeat(48));

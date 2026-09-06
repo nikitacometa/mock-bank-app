@@ -6,22 +6,91 @@ user-lens walkthrough. Артефакты рана — в scratchpad сесси�
 факты перенесены сюда. Sol (GPT-5.6) в этом ране недоступен — Track B вёл Claude в контрастной
 MVP-first роли (см. Приложение).
 
+## 0. Addendum: multi-user Telegram demo
+
+Дата решения: 2026-09-05. Этот раздел и
+`docs/internal/TELEGRAM_LEDGER_DESIGN_2026_09_05.md` заменяют более ранние утверждения ниже о
+client-only Telegram ledger, fixed four-account product scope и backend только для preferences.
+
+- Обычный web-demo остаётся device-local. В Telegram Mini App SQLite хранит authoritative
+  `BankState` отдельно для canonical Telegram ID; bot и TMA применяют к нему общий pure domain через
+  typed idempotent commands.
+- Fresh fixture начинается с четырёх role-accounts в выбранной из восьми base currencies. KZT
+  сохраняет owner fixture, остальные семь fixtures полностью synthetic, country-specific и
+  выровнены по USD-value. После старта пользователь может добавлять checking accounts,
+  корректировать balance ledger-строкой и reversible close/restore счета.
+- Manual income/expense и monthly recurrence работают только для active checking accounts.
+  Расход, включая atomic historical backfill до 120 UTC-месяцев, не может увести баланс ниже нуля.
+  Savings допускает current adjustment только после interest settlement.
+- Первый authenticated device snapshot импортируется create-if-absent и становится canonical.
+  Sticky authority marker запрещает возврат к local writes. Отличающаяся pre-authority копия на
+  втором device не перезаписывается молча: пользователь явно выбирает server copy.
+- TMA rate refresh accepts no provider payload: the backend owns Frankfurter access and a 12-hour
+  process cache. User operations use a bounded 8,192-row sliding replay window; pending delivery,
+  imports and system materialization are never evicted. Recurring-warning outbox rows freeze their
+  user-facing context at commit time.
+- A request bypasses the mutation budget only when the exact operation ID and canonical payload
+  hash are already committed in SQLite. Invalid, conflicting and crash-before-commit retries are
+  charged; a committed domain failure is replayed as its stored outcome. Canonical parsing
+  deep-projects every nested state object and rejects future metadata.
+- Authenticated bootstrap is capped at 30 requests per canonical Telegram ID per minute after HMAC
+  validation but before SQLite lookup; it has no replay exemption. Every canonical server read
+  settles savings first, then materializes recurrence, and remains idempotent on the same UTC day.
+  Client preflight submits `settle` only when its adopted state still has an overdue active savings
+  anchor or an active due recurring rule, and coalesces concurrent calls per Telegram ID. A canonical
+  bootstrap is therefore a no-op, while an unmaterialized first import and UTC rollover still settle.
+  A pure bounded preflight suppresses a positive-interest batch that cannot fit at the exact
+  5,000-row ceiling instead of spending ingress/replay capacity on an impossible command. Local mode
+  keeps its device-side path, including verified Telegram foreground resumption.
+- Signed import and command routes charge non-replayable per-user ingress budgets after HMAC but
+  before body parsing and canonical hashing. A persisted exact replay bypasses only the narrower
+  mutation budget, never ingress.
+- Wizard steps atomically persist the next conversation session with its reply receipt. Delivery
+  and Telegram update processing have separate durable bits/retention, so either crash order
+  resumes the prompt before later input is accepted. A pending per-user reply is drained even when
+  its source update was not yet marked processed, preventing a newer wizard step from colliding with
+  the one-pending-reply constraint. Amount messages are normalized and bounded to
+  the canonical 64-code-point command limit before either preview or durable draft storage. Every
+  review rotates its opaque flow ID, binding Confirm to that exact draft; language changes replace
+  an active wizard with a localized dashboard, and stale buttons cannot reinterpret later input.
+  Account reviews also bind the displayed balance/status, while recurrence reviews bind every
+  mutable execution precondition: rule, account status/balance, UTC day and history capacity. A
+  changed snapshot requires a new review. If a prior attempt already committed the exact Telegram
+  update and command hash, retry enters the durable replay path before these preview checks.
+- A raw Telegram launch-session fingerprint starts an identity epoch before the possibly stale
+  parsed SDK user is trusted. Same-user foreground sync preserves valid UI state; a canonical
+  adoption closes only invalid account/card/transfer targets, while a namespace change resets all
+  transient state.
+- Production authority включается только после двух authority-capable immutable releases.
+  Односторонний switch и последующие activate/rollback защищены `release.sh ledger-mode` guards.
+  Повторный `server --apply` при уже включённом server mode пишет durable reconciliation audit и
+  повторяет health gates без ledger mutation. Local-mode bot публикует только non-mutating command
+  profile and keeps `/start` plus preference callbacks on the ordinary launch/ready cards; после
+  durable final switch event operator restart'ит current bot, чтобы startup
+  опубликовал server commands, затем выдерживает 31-second health/TLS gate.
+
+Это по-прежнему mock без реальных денег, KYC, bank connections или payment rails. Полный текущий
+implementation status и verification evidence живут в `docs/handoff.md`.
+
 ## 1. TL;DR
 
 Mobile-first SPA: **Vite + React 19 + TS + Tailwind v4 + Zustand + custom localStorage persistence**,
 без роутера (state machine экранов), Dexie и motion-библиотек. Баланс — производная
 от лога транзакций; отдельного мутируемого поля баланса нет. Деньги хранятся как
 безопасные целые minor units. Валютный домен поддерживает KZT, THB, VND, RUB, USD, EUR,
-IDR и GEL; demo содержит ровно четыре seed-счёта: два KZT, один USD и один EUR.
+IDR и GEL; fresh demo содержит четыре role-счёта, а account lifecycle позволяет добавлять и
+reversible close/restore пользовательские checking accounts.
 Основная валюта настраивается, reference rates загружаются из Frankfurter, а FX snapshot
 остаётся неизменяемым на обеих ногах кросс-валютного перевода.
 
 Platform seam (`platform/*`) и машинные гарды изолируют браузер и Telegram. Web-адаптер
 работает; Telegram-адаптер мигрирован на maintained `@tma.js/sdk-react` 3.0.23 и покрыт
-тестами. Companion Node 22 service реализует RU/EN bot-onboarding и HMAC-validated bootstrap
-предпочтений; банковский ledger остаётся только на клиенте. BotFather Main Mini App/menu/profile
-настроены, а signed bootstrap уже прошёл в Telegram Desktop WebView; полный RU/EN onboarding и
-Android/iOS acceptance ещё не приняты. Authoritative DNS `euphoria.bot` переведён на выделенный
+тестами. Local Node 22 candidate extends RU/EN onboarding into per-user bank wizards and owns the
+Telegram mock ledger after a guarded server-mode activation; ordinary web remains local. Its signed
+API covers create-if-absent import, typed commands and backend-only rate refresh. This candidate is
+not deployed yet. BotFather Main Mini App/menu/profile настроены, а signed bootstrap предыдущего
+release уже прошёл в Telegram Desktop WebView; новый ledger flow и Android/iOS acceptance ещё не
+приняты. Authoritative DNS `euphoria.bot` переведён на выделенный
 Irena VPS; release `20260902T233133Z` active/healthy, identical-source release
 `20260902T233104Z` — automatic previous, D→C→D rollback rehearsal пройден. Hostinger остаётся
 TLS-valid external rollback origin до full real-device pass; проверенные
@@ -32,11 +101,12 @@ system/Cloudflare/Google/Quad9 resolvers сходятся на Irena. Дизай
 ## 2. Задача и контекст
 
 Pet-проект-эксперимент: минималистичный mock-банк с полировкой уровня настоящего необанка 2026.
-Скоуп: ровно четыре demo-счёта (KZT current + savings с мок-процентом, один USD и один EUR),
+Скоуп: четыре fresh role-счёта (current + savings в base currency и два companion accounts),
 закрытый набор из восьми поддерживаемых валют (KZT/THB/VND/RUB/USD/EUR/IDR/GEL), история,
 мок-карты, переводы между своими счетами с FX и переводы мок-контактам. Все банковские
-данные — клиентский мок. Внешние границы ограничены
-read-only reference rates и bot backend, который хранит только Telegram onboarding preferences.
+данные вымышлены: web хранит их на устройстве, а Telegram после activation хранит отдельный
+authoritative snapshot на сервере для каждого canonical Telegram ID. Внешние границы ограничены
+read-only reference rates и этим server-authoritative Telegram mock-ledger с chat UX.
 Фаза 1 — веб-аппка
 (mobile-first, десктоп терпимо-адаптивен), фаза 2 — Telegram Mini App; архитектура обязана
 сделать порт «днями, не неделями». Не в скоупе: кредиты, реальные интеграции, KYC, реальные деньги.
@@ -82,7 +152,7 @@ sheets вместо модалок; spring-физика на интеракти�
 | Svelte 5 (быстрее, меньше бандл) | ресёрч stack | React уже выбран и вся UI/domain test surface написана; смена stack дороже изолированного adapter seam, который уже мигрирован на maintained `@tma.js/sdk-react` |
 | React Router | Track A v1 | На 3 экранах + шитах роутер не окупается; BackButton-привязку в TMA всё равно писать руками; стейт-машина — 15-20 строк (механизм уточнён кросс-ревью: Router в TMA технически работает, но не даёт выгоды) |
 | Dexie/IndexedDB | ресёрч stack (digest) | Масштаб демо не окупает вторую модель persistence. Внутри вкладки обе ноги перевода пишутся одним `set()`; между вкладками read-modify-write перевода сериализует Web Locks с перечитыванием persisted state. iOS-очистка — довод за persistence seam, а не за Dexie |
-| Полный банковский backend с день 1 (Hono/Workers) | Track A v1 (вариант C) | Инфраструктура ради спекулятивных счетов не окупается. При активации TMA добавлен узкий Node service только для bot onboarding и HMAC bootstrap; ledger/карты/балансы туда не переехали |
+| Полный банковский backend с день 1 (Hono/Workers) | Track A v1 (вариант C) | Исходный full-backend scope был преждевременным. После выбора multi-user demo добавлен узкий SQLite authority только для Telegram mock-ledger; web и real-money rails в backend не переехали |
 | Форк open-source шаблона | ресёрч opensource | Чужой скоуп дороже вырезать, чем написать 4 экрана с нуля; мёртвые абстракции против «маленькой чистой базы» |
 | shadcn/ui как визуальная система | оба v1 | Дефолтный скин = generic-2026 антипаттерн. НО: headless-механика Radix Dialog (focus-trap, portal, scroll-lock) для Sheet — берём, скин свой |
 | Motion/framer-motion глобально | оба v1 | Единственные не-CSS анимации — count-up (~30 строк RAF) и card-tilt (~50 строк). Библиотека — только если M6 упрётся |
@@ -127,9 +197,9 @@ src/
   ui/screens/sheets/     — один TransferSheet с initialMode 'own'|'contact',
                            AccountDetailSheet, CardDetailSheet, SettingsSheet
   styles/tokens.css      — @theme: oklch-палитра (dark), типографика, radius, --ease, --app-height
-bot/                     — dependency-free Node 22 polling worker: RU/EN onboarding + /privacy,
-                           SQLite preferences/revision epoch/durable reply outbox,
-                           Bot API profile/menu setup, signed /bootstrap + /healthz
+bot/                     — dependency-free Node 22 polling worker: RU/EN onboarding + bank wizards,
+                           SQLite preferences/authoritative BankState/typed outboxes,
+                           Bot API setup, signed bootstrap/import/command endpoints + /healthz
 deploy/bot/              — hardened container, file-only secret, activation/rollback runbook
 ```
 
@@ -141,6 +211,9 @@ deploy/bot/              — hardened container, file-only secret, activation/ro
 ```ts
 type Money = number;                     // целые minor units, никогда float
 type Currency = 'USD'|'EUR'|'RUB'|'KZT'|'THB'|'VND'|'IDR'|'GEL';
+type DemoFixtureId = 'owner-kzt-v1' | 'synthetic-thb-v1' | 'synthetic-vnd-v1'
+  | 'synthetic-rub-v1' | 'synthetic-usd-v1' | 'synthetic-eur-v1'
+  | 'synthetic-idr-v1' | 'synthetic-gel-v1';
 
 interface ExchangeRateSnapshot {
   base: 'USD'; asOf: string; fetchedAt: string; source: 'frankfurter'|'fallback';
@@ -149,6 +222,8 @@ interface ExchangeRateSnapshot {
 
 interface Account {
   id: string; type: 'checking' | 'savings'; name: string; currency: Currency;
+  role: 'primary-checking'|'primary-savings'|'companion-1'|'companion-2'|'custom';
+  status: 'active'|'closed'; closedAt?: string;
   number: string;                        // мок-реквизиты: «40817 810 …» — для экрана реквизитов
   apy?: number;                          // только savings; ВИДИМ в UI (бейдж «X% годовых»)
   accrualAnchor?: string;                // ISO, последний settle
@@ -159,10 +234,13 @@ interface Transaction {
   id: string; accountId: string; seq: number;      // seq — монотонный, решает ties по времени
   amountMinor: Money;                              // знак: + приход, − расход
   balanceAfterMinor: Money;                        // БАЛАНС СЧЁТА = balanceAfterMinor последней строки
-  kind: 'purchase'|'transfer_own_out'|'transfer_own_in'|'transfer_contact'|'interest'|'topup'|'seed';
+  kind: 'purchase'|'transfer_own_out'|'transfer_own_in'|'transfer_contact'|'interest'|'topup'|'seed'
+      | 'manual_income'|'manual_expense'|'balance_adjustment';
   status?: 'posted'|'pending';                    // отсутствие = posted; pending резервирует available balance
   counterparty?: string; category?: string;
   transferGroupId?: string;                        // связь двух ног own-transfer — ДЛЯ UI
+  note?: string; effectiveDate?: string;
+  recurringRuleId?: string; occurrenceKey?: string;
   fxSnapshot?: {                                  // один immutable snapshot на обеих ногах
     fromCurrency: Currency; toCurrency: Currency;
     fromAmountMinor: Money; toAmountMinor: Money; rate: string;
@@ -173,15 +251,25 @@ interface Transaction {
 }
 
 interface Card { id; accountId; brand: 'visa'|'mastercard'; last4; holder; expiry;
-                 design: 'midnight'|'ivory'|'mint'; status: 'active'|'frozen' }
+                 design: 'midnight'|'ivory'|'mint'; status: 'active'|'frozen';
+                 freezeReason?: 'manual'|'account_closed' }
                  // полного номера НЕТ нигде — ни в модели, ни в DOM (grep-AC)
+
+interface RecurringRule {
+  id; accountId; direction: 'income'|'expense'; amountMinor: Money; counterparty; note?; category;
+  cadence: 'monthly'; anchorDay: number; startsOn: string; nextOccurrence: string;
+  status: 'active'|'paused';
+  pauseReason?: 'manual'|'account_closed'|'capacity'|'overflow'|'insufficient_funds'; createdAt;
+}
 
 interface Contact { id; name; initials; lastTransferAt?: string }   // сортировка: recent first
 interface Profile { displayName; telegramId?: string }
 interface BankState {
   primaryCurrency: Currency;
+  demoBaseCurrency: Currency;
+  fixtureId: DemoFixtureId;
   exchangeRates: ExchangeRateSnapshot;
-  accounts: Account[]; transactions: Transaction[];
+  accounts: Account[]; transactions: Transaction[]; recurringRules: RecurringRule[];
   // cards, contacts, profile, nextSeq, recentTransferIds
 }
 ```
@@ -207,7 +295,9 @@ settle-если-нужно → валидация → обе ноги + стро
 суммами записывается в обе ноги. Persistence-валидатор пересчитывает этот FX и отклоняет
 подменённый persisted state. Store оборачивает в exclusive Web Lock все whole-state mutators
 (`transfer`, primary currency, rates, settle, card freeze, reset) и внутри него перечитывает свежий persisted
-state. First-run seed выбирается под тем же lock. После failed persistence write текущий in-memory
+state. Local transfer проходит через тот же bounded `applyBankCommand`, что и server mode: contact
+leg и обе own-account legs preflight'ят общий 5,000-row ceiling и при `capacity` не меняют state.
+First-run seed выбирается под тем же lock. После failed persistence write текущий in-memory
 state остаётся authoritative и не откатывается stale storage/event до успешной записи. Rejected
 lock acquisition даёт один unserialized run; ошибка callback пробрасывается без повтора transition.
 
@@ -216,6 +306,23 @@ lock acquisition даёт один unserialized run; ошибка callback пр�
 `incomingAmountMinor`; повтор → `{ok:true, applied:false}` без receipt. Кнопка дизейблится
 на клик — идемпотентность вторая линия, не единственная. `transferGroupId` — отдельный, только
 для группировки в UI.
+
+**Manual and recurring entries** target active checking accounts only. A monthly rule selects an
+explicit UTC start year, month and billing day; historical materialization is atomic and capped at
+120 rows. Every expense prefix is preflighted, so no committed command can make the mock balance
+negative. Resuming an already-active rule is an exact `applied: false` no-op. Savings supports only
+a current balance adjustment after interest settlement.
+
+Account and recurring confirmations re-preview the latest canonical state before submitting their
+typed command. A still-valid account command is also re-reviewed when its displayed balance or
+status changed. A recurrence review fingerprints the full rule, account status/balance, UTC day and
+transaction count, so Resume cannot report success from a stale balance/capacity projection. Domain
+errors expose a recovery action; successful drift rotates the review callback instead of silently
+reusing it.
+
+**Account removal** is reversible close at zero balance, not deletion. History remains. Linked
+rules/cards pause or freeze with `account_closed`; restore reverses only that automatic reason and
+preserves manual pauses/freezes.
 
 ### 5.3 Навигация и экраны
 
@@ -283,39 +390,81 @@ skeleton, не спиннер.
 
 ### 5.5 Данные и надёжность демо
 
-- Zustand + custom localStorage persistence, один ключ, `schemaVersion: 4`; несовпадение версии / битый JSON /
+- Zustand + custom localStorage persistence, один ключ, `schemaVersion: 5` с explicit v4 migration; несовпадение старой версии / битый JSON /
   невалидная форма → видимый сброс к сиду с тостом, не белый экран и не тихий partial-hydrate.
 - `storage`-event доставляет состояние между вкладками; все whole-state mutators дополнительно
   сериализованы через Web Locks и перечитывают persisted state внутри lock. Bootstrap также под lock;
   failed write включает in-memory-authoritative mode. Notices идут FIFO через заранее смонтированный
   live-region и не перетирают recovery/rates. Rejected Web Lock может деградировать в single-run
   fallback только в том же persistence namespace; смена Telegram identity вместо этого abort'ит
-  stale mutation.
+  stale mutation. Runtime boundary строит exact deep projection не только top-level `BankState`, но
+  и rate/account/transaction/FX/card/contact/profile/rule objects; unknown nested keys не попадают в
+  persistence или canonical digest. Future account/closure/accrual, transaction/FX/contact и rule
+  metadata отклоняются относительно trusted current clock.
 - Frankfurter запрашивается с base USD и точным набором из семи quotes за bounded UTC range
-  `fetchDay-7…fetchDay`. Клиент выбирает последний день с полным same-date набором и никогда
-  не смешивает carry-forward rows разных observation dates. Timeout — 8 секунд; живой snapshot
-  кэшируется на 12 часов. Provider date не может быть из будущего или отставать более чем на
-  семь UTC-дней. Delayed response не заменяет более новый валидный live snapshot (`asOf`, затем
-  `fetchedAt`); invalid/future-clock current не блокирует candidate. При недоступном API демо
-  продолжает работать на persisted или seed fallback-курсах.
+  `fetchDay-7…fetchDay`. Последний полный same-date набор выбирается атомарно; carry-forward rows
+  разных observation dates не смешиваются. Timeout — 8 секунд; decoded body ограничен 256 KiB,
+  payload — 64 rows, snapshot кэшируется на 12 часов.
+  Provider date не может быть из будущего или отставать более чем на семь UTC-дней. Delayed response
+  не заменяет более новый snapshot (`asOf`, затем `fetchedAt`). Web вызывает read-only provider
+  напрямую; server-mode TMA отправляет только signed refresh request, а backend владеет payload,
+  process-wide cache и in-flight dedupe. Provider failure или regressing candidate включает общий
+  30-second retry cooldown и не меняет canonical snapshot. `/bank-rates` имеет отдельный
+  non-replayable per-user budget: повтор `clientMutationId` всё равно считается новым refresh.
 - ErrorBoundary на корне: fallback «что-то пошло не так → Перезапустить демо» (сброс к сиду).
   Худший провал продукта — крэш на живом показе, это требование того же ранга, что дизайн.
 - Web-демо и TMA-демо на одном устройстве — РАЗНЫЕ storage: состояние не переносится, это ожидаемое
   поведение, не баг. Внутри одного TMA origin bank/locale/receipt дополнительно разделены по
   canonical Telegram ID. До HMAC-verified bootstrap работает неперсистентный quarantine; unknown
   identity не видит и не перезаписывает предыдущий snapshot. Legacy singleton копируется только
-  при точном совпадении verified ID.
+  при точном совпадении verified ID. Fingerprint raw launch session открывает новый synchronization
+  epoch до чтения parsed SDK user; obsolete foreground response не может заново открыть прежний
+  namespace. Same-user adoption сохраняет валидные screen/sheet/draft/toasts и History selection
+  закрытого счёта, но закрывает sheet/transfer targets, которых больше нет в canonical
+  account/card/contact topology. Полный `resetUi()` выполняется только при реальной
+  persistence-namespace boundary.
 - Telegram `initData` считается недоверенным до server-side HMAC validation. `/api/tma/bootstrap`
   принимает только пустой JSON body + `Authorization: tma <raw-init-data>`, проверяет подпись,
   duplicate keys, future skew и 24-hour freshness bound, затем возвращает versioned preference
-  projection. Response содержит только `telegramId`, locale, primary currency, canonical display
-  name, onboarding completion и monotonic revision. Frontend receipt привязан к Telegram user и
-  BankState schema; смена аккаунта сначала скрывает прошлый state, затем восстанавливает отдельный
-  user-specific snapshot или создаёт новый mock seed.
-- Bot SQLite хранит `telegram_user_id`, locale, primary currency, display name, onboarding stage,
-  revision, timestamp и bounded processed-update window. Счета, транзакции, карты, курсы и суммы
-  в backend не отправляются. Query parameters используются везде; unexpected 500 получает только
-  safe server-side metadata без request body, Authorization и provider description.
+  projection и additive bank projection. Каждый response с canonical bank state содержит exact
+  UTC `serverTime`, canonical Telegram ID, epoch, revision, digest and state; `import_required`
+  state не содержит. Frontend проверяет timestamp против device clock только широким 24-hour sanity
+  bound, а сам `BankState` валидирует относительно `serverTime`, поэтому секундный clock skew не
+  превращает корректный server snapshot в ошибку. Receipt связывает revision fields с BankState schema.
+  Смена аккаунта сначала скрывает прошлый state, затем получает его отдельный authoritative snapshot
+  или проходит strict create-if-absent import. Первый accepted device snapshot становится canonical;
+  отличающаяся local copy другого device требует явного перехода на server copy. Strict import
+  отклоняет future immutable timestamps, recurrence вне разрешённого UTC window, неверное
+  role/type/base-currency mapping и duplicate active checking currencies.
+  После HMAC validation bootstrap списывает отдельный per-user budget `30/min` до `ensureUser` и
+  bank-state lookup; у read-запроса нет replay exemption. Canonical server read под repository lock
+  всегда выполняет `applySettleAll` до recurring materialization. Эту функцию используют bootstrap
+  и bot chat reads; повтор в тот же UTC-день не создаёт interest/occurrence rows и не повышает
+  revision без изменения state. Если materialization превысит 4 MiB snapshot limit, bootstrap
+  возвращает последний canonical snapshot без частичного write. `reset_demo` обходит due
+  materialization и остаётся recovery path; обычные увеличивающие state команды возвращают typed
+  `413 bank_state_too_large`.
+- Bot SQLite хранит `telegram_user_id`, locale, display name, onboarding state, authoritative mock
+  `BankState`, command ledger, recurring conversation drafts, `conversation_replies` receipts и typed
+  outbox. Все bank rows изолированы по authenticated Telegram ID; первый import create-if-absent.
+  Каждый wizard transition пишет новый session и предназначенный ему reply одной SQLite transaction.
+  Reply delivery и `update_processed` фиксируются независимо: pending processed receipt переживает
+  bounded processed-ID pruning, delivered-before-processed receipt удаляется после acknowledgement,
+  а delivered orphan истекает с six-day sequence-reset window. Query parameters используются везде;
+  unexpected 500 получает только safe server-side metadata без request body, Authorization и
+  provider description.
+- Authority activation requires a per-user client-contract marker emitted by the exact running
+  build. Both BotFather Main Mini App and per-user menu URLs use `/app/<release-id>/` as a fresh
+  cache key; a cached root document is not accepted as bridge evidence. Well-formed versioned paths
+  fall back to the current image during rollback, whose compiled marker identifies the served build.
+- User-created `telegram`/`tma` operation history is a sliding window capped at 8,192 rows per user.
+  Exact retries are resolved while retained. Before a fresh command, the oldest row without pending
+  outbox is evicted in the same SQLite transaction; rollback restores it if the replacement fails.
+  Import and system materialization remain outside that budget, and pending delivery is never
+  evicted. If every retained row is protected, the command fails typed and atomically until delivery
+  frees a slot. Warning outbox payloads freeze rule, reason, counterparty, currency and overdraft
+  amounts at commit time. Delayed delivery never reconstructs copy from a later state; legacy rows
+  without context use generic wording.
 
 ### 5.6 Деплой
 
@@ -331,11 +480,43 @@ Android/iOS Telegram clients. Hostinger сохраняется как отдел
 Bot разворачивается отдельным immutable Node 22 image. Token устанавливается только через hidden
 TTY prompt в root-owned `0600` file и bind-mount read-only; `.env`, argv и shell history его не
 содержат. Container работает non-root, read-only, без capabilities и подключается к shared Nginx
-через отдельную edge network без доступа к Mongo/data plane. Публичен только rate-limited
-`POST /api/tma/bootstrap`; polling и health endpoint наружу не экспонируются.
+через отдельную edge network без доступа к Mongo/data plane. Current live release publishes only
+rate-limited `POST /api/tma/bootstrap`. The local authority candidate additionally defines signed,
+rate-limited `bank-import`, `bank-command` and `bank-rates` routes; they are not production claims
+until bridge activation. A mutation bypasses the per-user budget only after the exact operation ID
+and canonical payload hash already exist in SQLite; invalid, conflicting or otherwise uncommitted
+retries are charged. Committed domain failures are stored outcomes and replay with the exemption.
+Polling and health remain private.
+
+While `ledgerMode=local`, Telegram profile setup and `/help` expose only `/start`, `/settings`,
+`/help` and `/privacy`; mutation commands are not advertised before authority. The one-way
+`server --apply` path records the final durable switch event, restarts the current bot so startup
+publishes RU/EN server command profiles, then requires 31 continuous healthy seconds plus TLS/API
+smoke. A reconciliation run in an already-server database repeats the restart and gates without
+changing ledger data.
 
 Production target — выделенный Irena VPS (`ssh irena`, `/srv/cometa-bank`) со standalone
-Compose edge: public network есть только у Nginx, bot использует internal edge и отдельный egress.
+Compose edge: host Caddy один держит public `80/443`, Nginx публикует только loopback
+`8080/8443`, а bot использует internal edge и отдельный egress. Перед первым source-clean bridge
+extracted release A сначала запускает `install-docker-perimeter.sh` dry-run/apply. Installer
+требует Docker Engine 28+, атомарно ставит canonical three-key `/etc/docker/daemon.json`, оставляет
+единственный daemon host `-H fd://` и pinned local `/run/docker.sock`, затем делает один controlled
+Docker restart с проверкой неизменных container IDs/restart counts, exact networks, SQLite и обоих
+HTTPS boundaries. Root-only journal и exact `.pending.next`/`daemon.json.cometa-bank.next`
+candidates позволяют продолжить только однозначный install/rollback; любой unknown или mixed state
+fail closed. После этого candidate-owned `harden-edge --apply` target-scoped убирает Cometa TLS bypass из installed Caddy,
+применяет host-wide Caddy policy `h1/h2` и добавляет exact trusted real-IP block в legacy Nginx;
+unrelated Caddy route blocks сохраняются. Та же транзакция переводит Caddy admin с legacy
+`127.0.0.1:2019` на caddy-owned Unix socket mode `0200`, ставит `persist_config off`, reload'ит через
+текущий endpoint и сверяет live config с installed file. Strict preflight и каждый lifecycle gate затем проверяют
+эти semantics, отсутствие UDP `443`, normal inner certificate trust с 21-дневным запасом и exact
+runtime bindings и exact Compose-owned `bridge` topology. Edge hardening хранит original configs вне
+process scratch, связывает их hashes с operator/current marker и блокирует остальные lifecycle actions
+до verified commit или recovery. Activation и rollback перед парой symlink writes flush'ят durable
+intent и fsync'ят directory после каждой rename; повторный запуск принимает только
+before/between/complete link state, восстанавливает target runtime и завершает audit. Runtime contract
+требует Docker Engine 28+, exact project identity, attached primary network, allow-listed bridge
+options и пустой bot port map; rollback intent принимает только original-current operator.
 Release tags привязаны к immutable image-ID manifests; deploy и Certbot renewal используют один
 `flock`. Identical-source releases `20260902T233104Z` и `20260902T233133Z` независимо прошли
 `pnpm verify`; второй активен, первый — automatic previous. Live D→C→D rollback rehearsal,
@@ -410,6 +591,18 @@ pending bundles, orphan containers и Docker metadata errors обрабатыв�
   полный RU/EN bot-onboarding, rotation owner-authorized exposed test token до нетестового
   использования и приёмка в реальном Telegram WebView на Android/iOS. Опция
   кросс-девайс: CloudStorage за тем же persistence seam.
+- **M9 — Multi-user demo ledger.** Eight base-currency fixtures, persistence v5, shared typed bank
+  commands, per-Telegram-ID SQLite authority, one-time canonical import, bot transaction/recurrence
+  and account-management wizards, reversible close/restore, atomic UTC backfill and no-overdraft.
+  The implementation candidate is local; it is not active in production. Rollout requires two
+  authority-capable releases under local mode, a guarded one-way server switch, two-profile Telegram
+  acceptance and three real README captures. Offsite backup/restore drill and epoch-ordered disaster
+  recovery remain separate follow-ups.
+
+Первый release bridge выполняется строго в порядке: package/extract source-identical A/B →
+`install-docker-perimeter.sh` dry-run/apply из A → `release.sh harden-edge` dry-run/apply из A →
+strict preflight A/B → prepare A/B → activate A/B при `ledgerMode=local`. На 2026-09-06 ни один из
+этих candidate steps на Irena не запускался; production остаётся на прежнем device-local baseline.
 
 Точное текущее verification evidence и история independent review живут в `docs/handoff.md`, чтобы
 цифры не расходились между документами. Обязательные механизмы здесь: focused behavior tests,
@@ -429,16 +622,27 @@ compiling named mutants для domain/state изменений, полный `pn
 | Persisted ID резервирует будущий `tx_N`/`grp_N` и ломает следующую запись | Schema v4 требует canonical `tx_${seq}` и связывает runtime group с seq исходящей ноги |
 | Обезличенная выписка всё равно fingerprintable по датам, merchants и суммам | PII и identifiers удалены; риск явно указан в README/handoff. Для публичного шаринга нужен отдельный shifted/synthetic fixture |
 | Устаревший/частичный FX payload искажает конверсию | Bounded UTC range, последний полный same-date exact quote set, лаг ≤7 UTC-дней, атомарный reject и fallback |
+| TMA подменяет provider rates или создаёт request storm | TMA sends only a signed refresh intent; backend owns bounded parsing, coherent adoption, one process-wide 12-hour cache, 30-second failure cooldown, in-flight dedupe and a non-replayable refresh budget |
 | Исторический FX «плывёт» после refresh rates | Immutable `fxSnapshot` на обеих ногах + persistence-реконструкция курса |
-| Часы устройства/DST ломают проценты | epochDayUTC + max(0,…) + явные AC в M1 |
+| Часы устройства/DST ломают проценты или отклоняют свежий server snapshot | epochDayUTC + max(0,…); canonical state валидируется по exact response `serverTime`, а device clock используется только как 24-hour corruption bound |
 | Порт TMA «дни → недели» | Seam + ESLint-гард + CSS-grep; без роутера; CTA/back за seam с M2/M5 |
 | Late Telegram bridge монтирует native control без action/config | Desired Main/Back state хранится в adapter и replay после успешного mount; bounded retry regression |
 | Telegram SDK снова меняет API | Maintained `@tma.js/sdk-react` pinned exact; platform seam изолирует SDK, adapter tests + real WebView gate обязательны перед bump |
 | Подмена или stale Telegram preferences после пересоздания DB | Raw initData проверяется backend HMAC/freshness; frontend принимает exact versioned projection и связывает receipt с canonical Telegram ID + server revision epoch |
+| Signed bootstrap loop превращает read path в SQLite DoS | Separate authenticated 30/min budget per Telegram ID runs before user/bank lookup and has no replay exemption |
+| Signed mutation body обходит limiter дорогим parsing/hash | Import and command ingress budgets run after HMAC but before body read/canonicalization; exact durable replay bypasses only the inner mutation budget |
+| Parsed SDK user отстаёт после смены Telegram account | Raw-session fingerprint открывает новый identity epoch и quarantine до verified bootstrap; obsolete sync не может переоткрыть старый namespace |
 | Два Telegram-аккаунта на одном origin читают/перезаписывают общий mock ledger | Ephemeral pre-verification quarantine + canonical per-ID bank/locale/receipt namespaces; exact-key storage listeners; same-ID dirty state остаётся authoritative |
 | Telegram рандомизирует `update_id` после долгого простоя | Exact-ID dedupe + persisted timestamp; после шести суток без update sequence offset сбрасывается перед long poll |
 | Недоставленный custom-name reply останавливает весь bot | Atomic preference+outbox mutation; per-row retry/backoff после успешного poll; один reply не влияет на readiness и не блокирует следующие строки |
+| Wizard сохранил step, но crash потерял prompt, либо prompt ушёл до processed marker | Session + conversation reply receipt commit atomically; independent delivery/processed state covers both crash orders and bounded retention prevents an orphan from living forever |
+| Operation ledger grows without bound or capacity blocks recovery | 8,192-row sliding replay window; prune the oldest completed row transactionally, protect pending outbox, and keep import/system materialization outside the user window |
+| Invalid retry бесплатно обходит mutation limiter | Exemption consults the exact persisted `(user, source, operation ID, canonical hash)`; invalid, conflicting and otherwise uncommitted attempts are charged again, while a committed domain failure replays its stored outcome |
+| Delayed warning describes a reset or edited rule | Warning outbox freezes rule/reason/counterparty/currency/amount context at commit; legacy rows render generic copy |
+| Bot read показывает recurrence без начисленного savings interest либо дублирует UTC-day rows | One canonical locked materializer always runs `applySettleAll` before recurrence and is same-day idempotent across bootstrap/chat reads |
 | Deploy обрывает Bot API request или длинный `retry_after` | Один worker `AbortSignal` отменяет handler, send/callback/menu fetch и sleep внутри Compose shutdown grace |
+| Ambient Docker context или daemon API расширяет host boundary | Все release calls pin `/usr/bin/docker`, empty CLI config и `/run/docker.sock`; one-time installer требует единственный systemd `-H fd://`, exact daemon JSON, Docker 28+ и durable fail-closed recovery |
+| Caddy autosave/TCP admin расходится с installed edge | `persist_config off`; caddy-owned Unix admin socket mode `0200`; reload через текущий endpoint; live canonical config обязан совпасть с installed Caddyfile |
 | App rollback откатывает recovery-логику Certbot или renewal падает в crash-window | Host-owned worker привязан к recorded immutable release; persistent systemd guard/journal; `--recover-only`; pending/orphan/Docker metadata gates fail closed |
 | Утечка bot token | File-only service-owned secret, hidden prompt, redacted logs, container read-only; token из chat запрещён для нетестового использования. Текущий owner-authorized test exception явно tracked и обязан быть revoke/rotate до public/non-test launch |
 | bindCssVars съедает бренд-акцент или контраст в light host | Только dark-host нейтрали; light host оставляет brand-safe base; явный AC в M8 |
@@ -463,7 +667,8 @@ compiling named mutants для domain/state изменений, полный `pn
    владельца перед вёрсткой.
 4. **Светлая тема** — не архитектурный вопрос (токены готовы), продуктовый: нужна ли вообще.
 5. **Request money / входящие переводы** — вне скоупа, добавлять ли потом.
-6. **Кросс-девайс демо** — если нужно, триггерит CloudStorage/бэкенд раньше срока.
+6. **Кросс-девайс демо** — resolved for authenticated Telegram identities by server authority;
+   anonymous web remains intentionally device-local.
 7. **Устройство демо** (iOS Safari vs Android Chrome) — куда смотреть в первую очередь на M6.
 
 ## 9. Приложение: вклад и артефакты

@@ -2,6 +2,9 @@
 
 FROM node:22.23.2-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS build
 
+ARG COMETA_RELEASE_ID
+ENV VITE_COMETA_RELEASE_ID="${COMETA_RELEASE_ID}"
+
 WORKDIR /app
 RUN corepack enable
 COPY package.json pnpm-lock.yaml tsconfig.json tsconfig.app.json tsconfig.node.json vite.config.ts ./
@@ -9,7 +12,10 @@ RUN pnpm install --frozen-lockfile
 COPY index.html ./index.html
 COPY public ./public
 COPY src ./src
-RUN pnpm build:web
+RUN pnpm build:web && \
+    printf '%s\n' "${COMETA_RELEASE_ID}" | grep -Eq '^[0-9]{8}T[0-9]{6}Z$' && \
+    install -d "dist/app/${COMETA_RELEASE_ID}" && \
+    cp dist/index.html "dist/app/${COMETA_RELEASE_ID}/index.html"
 
 FROM nginx:1.29.8-alpine3.23@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de AS runtime
 

@@ -1,0 +1,5 @@
+{
+  "allow-direct-routing": false,
+  "iptables": true,
+  "ip6tables": true
+}

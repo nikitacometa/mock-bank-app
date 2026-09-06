@@ -122,4 +122,32 @@ describe('SettingsSheet rate health', () => {
       useUiStore.setState(previousUi, true);
     }
   });
+
+  it('keeps reset recovery without exposing a fixture replacement control', async () => {
+    const previousBank = useBankStore.getState();
+    const previousUi = useUiStore.getState();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+
+    try {
+      useUiStore.setState({ ...previousUi, locale: 'en' }, true);
+      await act(async () => {
+        root.render(createElement(SettingsSheet));
+      });
+
+      expect(container.textContent).not.toContain('Demo history');
+      expect(container.querySelector('select')).toBeNull();
+      expect(
+        [...container.querySelectorAll<HTMLButtonElement>('button')].some(
+          (button) => button.textContent?.trim() === 'Reset demo data',
+        ),
+      ).toBe(true);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      useBankStore.setState(previousBank, true);
+      useUiStore.setState(previousUi, true);
+    }
+  });
 });

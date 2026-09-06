@@ -2,13 +2,17 @@ import { mkdir } from 'node:fs/promises';
 import type { Server } from 'node:http';
 import { dirname } from 'node:path';
 import { BotApiClient } from './bot-api.js';
+import { bankDomainAdapter } from './bank-domain.js';
+import { BankAuthorityService } from './bank-service.js';
 import { loadConfig } from './config.js';
 import { createBotHttpServer, type ReadinessSnapshot } from './http-server.js';
 import { serviceLogger } from './logger.js';
 import { OnboardingEngine } from './onboarding.js';
 import { LongPoller } from './poller.js';
+import { InMemoryBankRequestLimiter } from './rate-limit.js';
 import { PreferencesRepository } from './repository.js';
 import { setupBotForPolling } from './setup.js';
+import { CachedExchangeRateProvider } from '../src/services/exchangeRates.js';
 
 function listen(server: Server, port: number): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -31,8 +35,24 @@ async function main(): Promise<void> {
   const config = loadConfig(process.env);
   await mkdir(dirname(config.dataPath), { recursive: true, mode: 0o700 });
   const repository = new PreferencesRepository(config.dataPath);
+  const bankService = new BankAuthorityService(
+    repository,
+    bankDomainAdapter,
+    () => new Date(),
+    new CachedExchangeRateProvider(),
+  );
+  const bankRequestLimiter = new InMemoryBankRequestLimiter();
   const client = new BotApiClient(config.botToken, config.publicWebAppUrl);
-  const engine = new OnboardingEngine(repository, client, config.publicWebAppUrl, serviceLogger);
+  const engine = new OnboardingEngine(
+    repository,
+    client,
+    config.publicWebAppUrl,
+    serviceLogger,
+    undefined,
+    undefined,
+    bankService,
+    bankRequestLimiter,
+  );
   const poller = new LongPoller(client, engine, repository, serviceLogger);
   const readiness: {
     botSetup: boolean;
@@ -52,6 +72,8 @@ async function main(): Promise<void> {
     publicWebAppUrl: config.publicWebAppUrl,
     readiness: readinessSnapshot,
     logger: serviceLogger,
+    bankService,
+    bankRequestLimiter,
   });
   const abortController = new AbortController();
   const beginShutdown = (): void => {
@@ -68,7 +90,9 @@ async function main(): Promise<void> {
     await listen(server, config.port);
     listening = true;
     serviceLogger.info('bot_http_listening', { port: config.port });
-    await setupBotForPolling(client, abortController.signal, serviceLogger);
+    await setupBotForPolling(client, abortController.signal, serviceLogger, {
+      ledgerMode: repository.ledgerMode(),
+    });
     readiness.botSetup = true;
     readiness.polling = true;
     serviceLogger.info('bot_polling_ready');

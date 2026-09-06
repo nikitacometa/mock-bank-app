@@ -3,7 +3,7 @@ import { useUiStore } from '@/store/uiStore';
 import { usePlatform } from '@/platform/usePlatform';
 import { BANK_BIC, BANK_CORR } from '@/app/config';
 import { currencyName, translate, useI18n, type AppLocale } from '@/i18n';
-import { groupDigits, localizeDemoText } from '../../format';
+import { accountDisplayName, groupDigits, localizeDemoText } from '../../format';
 import { Sheet } from '../../primitives/Sheet';
 import { IconCopy } from '../../icons';
 
@@ -24,7 +24,7 @@ export function AccountDetailSheet({ accountId }: { accountId: string }) {
   const platform = usePlatform();
   const { locale, t } = useI18n();
 
-  if (!account) return null;
+  if (!account || account.status !== 'active') return null;
 
   const buildRows = (rowLocale: AppLocale): Array<[string, string]> => [
     [translate(rowLocale, 'accountDetails.recipient'), profileDisplayName(profile, rowLocale)],
@@ -54,7 +54,7 @@ export function AccountDetailSheet({ accountId }: { accountId: string }) {
     <Sheet
       open
       onClose={closeSheet}
-      title={t('accountDetails.title', { name: localizeDemoText(account.name, locale) })}
+      title={t('accountDetails.title', { name: accountDisplayName(account, locale) })}
     >
       <div className="px-5 pb-4">
         <div className="mt-2 divide-y divide-line/50 rounded-card bg-surface-2/50 px-4">

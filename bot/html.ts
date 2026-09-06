@@ -1,4 +1,8 @@
-const CONTROL_CHARACTERS = /[\p{Cc}\p{Cf}]/u;
+import {
+  DISALLOWED_USER_TEXT,
+  normalizeUserText,
+} from '../src/domain/inputValidation.js';
+
 const MAX_DISPLAY_NAME_CODE_POINTS = 48;
 
 export function escapeHtml(value: string): string {
@@ -11,15 +15,8 @@ export function escapeHtml(value: string): string {
 }
 
 export function normalizeDisplayName(value: string): string | null {
-  if (CONTROL_CHARACTERS.test(value)) return null;
-  const normalized = value.normalize('NFC').trim().replace(/\p{Z}+/gu, ' ');
-  if (
-    normalized === '' ||
-    [...normalized].length > MAX_DISPLAY_NAME_CODE_POINTS
-  ) {
-    return null;
-  }
-  return normalized;
+  if (DISALLOWED_USER_TEXT.test(value)) return null;
+  return normalizeUserText(value, MAX_DISPLAY_NAME_CODE_POINTS);
 }
 
 export function telegramDisplayName(

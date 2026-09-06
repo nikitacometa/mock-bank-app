@@ -33,7 +33,13 @@ export function accruedInterest(
  */
 export function applySettleAccount(state: BankState, accountId: string, nowISO: string): BankState {
   const account = state.accounts.find((a) => a.id === accountId);
-  if (!account || account.type !== 'savings' || !account.apy || !account.accrualAnchor) return state;
+  if (
+    !account ||
+    account.status !== 'active' ||
+    account.type !== 'savings' ||
+    !account.apy ||
+    !account.accrualAnchor
+  ) return state;
 
   const days = epochDayUTC(nowISO) - epochDayUTC(account.accrualAnchor);
   if (days <= 0) return state;
@@ -62,6 +68,36 @@ export function applySettleAccount(state: BankState, accountId: string, nowISO: 
 /** Settle every savings account — called on app load and day rollover. */
 export function applySettleAll(state: BankState, nowISO: string): BankState {
   return state.accounts
-    .filter((a) => a.type === 'savings')
+    .filter((a) => a.type === 'savings' && a.status === 'active')
     .reduce((s, a) => applySettleAccount(s, a.id, nowISO), state);
+}
+
+export interface BoundedSettlementOutcome {
+  readonly state: BankState;
+  readonly applied: boolean;
+  readonly capacityReached: boolean;
+}
+
+/**
+ * Settles the complete savings batch or leaves every row and accrual anchor
+ * untouched. A caller can therefore keep a full ledger readable and expose a
+ * typed capacity result instead of persisting an invalid 5,001st row.
+ */
+export function applySettleAllWithinTransactionLimit(
+  state: BankState,
+  nowISO: string,
+  maxTransactions = 5_000,
+): BoundedSettlementOutcome {
+  if (!Number.isSafeInteger(maxTransactions) || maxTransactions < 0) {
+    throw new RangeError('Transaction limit must be a non-negative safe integer');
+  }
+  const settled = applySettleAll(state, nowISO);
+  if (settled.transactions.length > maxTransactions) {
+    return { state, applied: false, capacityReached: true };
+  }
+  return {
+    state: settled,
+    applied: settled !== state,
+    capacityReached: false,
+  };
 }

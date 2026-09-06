@@ -1,12 +1,23 @@
 # Dedicated VPS deployment
 
-This stack deploys the Cometa SPA, Telegram bot, bootstrap API, Nginx, and
-Certbot on one dedicated Ubuntu 24.04 or 26.04 LTS VPS. It does not depend on the legacy
-Hostinger shared proxy or any unrelated domain.
+Cometa runs on one dedicated Ubuntu VPS. Caddy owns public HTTP, TLS, and ACME.
+The release containers are private to the host: Nginx listens on loopback and
+the bot has no host port.
 
-The migration deliberately has two gates: prepare the new origin first, then
-change DNS and issue its trusted certificate. HTTP-01 cannot safely prove a
-domain before public DNS reaches the new server.
+The current migration topology is intentionally transitional:
+
+```text
+Internet
+  -> Caddy :80/:443
+  -> Nginx 127.0.0.1:8443 (HTTPS compatibility hop)
+  -> SPA or bot API on the internal Compose network
+```
+
+Nginx also binds `127.0.0.1:8080`, but Caddy must stay on `8443` until two
+source-clean rollback releases exist. Moving Caddy to `8080` now would lose the
+complete API policy and could break a rollback. Caddy verifies the retained
+inner certificate and SNI through the host trust store; it also owns the public
+certificate and renewal.
 
 ## Runtime layout
 
@@ -16,200 +27,327 @@ domain before public DNS reaches the new server.
 ├── previous -> releases/<release-id>
 ├── backups/                 # root-only online SQLite backups
 ├── data/                    # UID 10001, bot SQLite database
-├── deployments.jsonl        # image IDs and activation history
+├── deployments.jsonl        # durable release and ledger-mode audit events
 ├── releases/<release-id>/   # immutable uploaded source
 ├── state/images/            # immutable release-to-image-ID manifests
-├── state/renewal-bundle.release # immutable source release for the host worker
-├── state/renewal-bundle.pending # crash-resumable host-worker migration journal
-├── state/renewal-bundle.legacy-timer # temporary legacy timer-state journal
-└── state/nginx/default.conf # atomic HTTP/HTTPS mode switch
+└── state/nginx/default.conf # active loopback Nginx policy
 
-/etc/cometa-bank/secrets/bot_token # UID 10001, mode 0600
-/usr/local/sbin/cometa-bank-renew-certificates # stable host-owned entrypoint
-/usr/local/libexec/cometa-bank-renew-certificates-worker # stable host-owned worker
-/etc/systemd/system/cometa-bank-cert-renew.*   # stable host-owned units
-/etc/systemd/system/cometa-bank-cert-renew.service.d/10-bundle-migration.conf
-    # temporary fail-closed guard during the one-time legacy migration
+/etc/caddy/Caddyfile                 # host-owned public edge
+/var/lib/caddy/.local/share/caddy/admin.sock # caddy-owned admin socket, mode 0200
+/etc/docker/daemon.json              # exact versioned local-only daemon policy
+/etc/cometa-bank/secrets/bot_token  # UID 10001, mode 0600
 ```
 
-Only ports 80 and 443 are published by Docker. The bot is reachable from Nginx
-only through the internal Compose network. A second bridge supplies Bot API
-egress; it is network isolation, not a destination allow-list. Restricting
-Telegram by fixed IP would be brittle, so general bot HTTPS egress is an
-explicit residual risk.
+The legacy `cometa-bank-cert-renew.timer` must be disabled and inactive. Its
+service may remain installed only as static and inactive. Active release flows
+must never issue a certificate, install the old renewal bundle, or enable those
+units.
 
-## 1. Package locally
+## Edge contract
 
-The packager always runs the complete project verification, rejects production
-token-shaped values and symlinked inputs, and emits a checksum beside the
-credential-free archive.
+`host-preflight.sh` fails unless all of these statements are true:
+
+- Docker Engine is `28.0.0` or newer, where localhost-published ports cannot
+  be reached by peers on the same L2 segment.
+- Caddy is enabled, active, and the exclusive non-loopback TCP listener on
+  `80` and `443`.
+- The installed Caddy config has one scoped route for each of `euphoria.bot`
+  and `www.euphoria.bot`, preserves `Host`, and proxies to
+  `https://127.0.0.1:8443` with matching SNI and normal certificate verification.
+- Caddy exposes only HTTP/1.1 and HTTP/2. UDP `443` stays closed because UFW
+  intentionally allows TCP only during this bridge.
+- Caddy persists no autosaved config and exposes exactly one admin listener:
+  `unix//var/lib/caddy/.local/share/caddy/admin.sock|0200`, owned by
+  `caddy.service`. The legacy TCP admin listener on `127.0.0.1:2019` is closed,
+  and the live config read through the socket exactly matches the installed
+  Caddyfile.
+- Neither scoped route adds HSTS.
+- rendered Compose and the running web container expose exactly
+  `127.0.0.1:8080 -> 8080` and `127.0.0.1:8443 -> 8443`.
+- the bot exposes no host port, SSH is key-only, UFW is default-deny, and its
+  only inbound allows are SSH plus TCP `80/443`.
+- the live Nginx policy restores the client address only from the loopback and
+  private Docker proxy ranges before applying per-IP limits.
+- the legacy renewal units are quiesced.
+- Docker was started only through systemd socket activation with the single
+  daemon host `-H fd://`; `/run/docker.sock` is the only API listener and has
+  no non-root group members. Release commands pin `/usr/bin/docker`, the local
+  socket, and a versioned empty CLI config instead of trusting shell context.
+- `/etc/docker/daemon.json` is the exact versioned three-key policy:
+  `allow-direct-routing=false`, `iptables=true`, `ip6tables=true`, and its
+  timestamps predate the running daemon process.
+
+The installed Caddyfile is checked semantically, not byte-for-byte. Never
+replace the whole host file merely to match
+`deploy/standalone/caddy/Caddyfile`; it may contain unrelated domains.
+
+`jq` is a required host dependency because the Compose and Caddy contracts are
+validated from structured output.
+
+## Package two bridge releases
+
+Run the complete project gate once, then package the same clean source under
+two distinct UTC release IDs. The packager runs `pnpm verify` again, rejects
+credential-shaped content and symlinked inputs, and emits a checksum next to
+each credential-free archive.
 
 ```bash
-./deploy/standalone/scripts/package-release.sh
+./deploy/standalone/scripts/package-release.sh --release-id <bridge-a>
+./deploy/standalone/scripts/package-release.sh --release-id <bridge-b>
 ```
 
-Upload both generated files to the new server. Verify the SSH host fingerprint
-out of band before accepting it for the first time.
+Both IDs use `YYYYMMDDTHHMMSSZ`. Extract the archives locally and compare their
+source trees before upload. Only the build-time release marker may differ in
+the resulting images.
 
 ```bash
-scp /private/tmp/cometa-bank-<release-id>.tgz{,.sha256} <new-host>:/tmp/
+scp /private/tmp/cometa-bank-<bridge-a>.tgz{,.sha256} irena:/tmp/
+scp /private/tmp/cometa-bank-<bridge-b>.tgz{,.sha256} irena:/tmp/
 ```
 
-## 2. Provision the host
+Verify the SSH host fingerprint through the existing `irena` alias. Do not
+place the bot token in an archive, environment variable, argument, log, or
+documentation.
 
-Extract a temporary copy, run the provisioner with the actual SSH port, and
-then extract the verified archive into its immutable release directory.
-`provision-host.sh` follows Docker's official apt-repository method rather than
-the convenience installer. It does not add a login user to the root-equivalent
-`docker` group.
+## Existing-host prerequisites
 
-Before passing `--confirmed-key-login`, open and verify a second
-key-authenticated SSH session as the intended sudo-capable login user and keep
-the original session open. Confirm `sudo -n true` succeeds in that second
-session. The provisioner changes the UFW policy, so the flag is an assertion
-that this recovery path already works, not a request for the script to create
-one.
+This lifecycle currently supports only the staged migration of an existing,
+healthy Irena runtime. It deliberately rejects a host without `current`, a
+running web container, and the installed edge contract. It is not a complete
+first-install bootstrap path.
+
+`provision-host.sh` can install base Docker, Caddy, `jq`, SQLite and UFW
+dependencies on Ubuntu 24.04 or 26.04, but that alone does not create the
+required application runtime. Design and test a separate bootstrap mode before
+using this stack on an empty VPS. Do not weaken the migration preflight to make
+an empty host pass.
+
+For the existing Irena host, install only a missing declared dependency, then
+validate the installed Caddy routes in place. Do not overwrite unrelated host
+blocks. The legacy Cometa Certbot timer and service must remain quiesced.
+
+## Install an uploaded release
+
+For each bridge archive, verify the checksum before extracting it into its
+final immutable directory:
 
 ```bash
 cd /tmp
 sha256sum --check cometa-bank-<release-id>.tgz.sha256
-mkdir cometa-bank-bootstrap-<release-id>
-tar -xzf cometa-bank-<release-id>.tgz -C cometa-bank-bootstrap-<release-id>
-sudo cometa-bank-bootstrap-<release-id>/deploy/standalone/scripts/provision-host.sh \
-  --apply --ssh-port 22 --confirmed-key-login
 sudo install -d -m 0755 /srv/cometa-bank/releases/<release-id>
 sudo tar -xzf cometa-bank-<release-id>.tgz \
   -C /srv/cometa-bank/releases/<release-id> --no-same-owner
 ```
 
-After provisioning, configure OpenSSH to disable root, password, and
-keyboard-interactive authentication, run `sudo sshd -t`, and reload SSH without
-closing the working session. Verify one more fresh key-only login, then run:
+The first strict preflight will intentionally fail while the legacy edge still
+uses the old trust, admin, client-IP, and Docker-daemon semantics. Install the
+Docker perimeter and run the one-time edge hardening below from bridge A first;
+later releases go directly through strict preflight.
+
+## Install the Docker daemon perimeter
+
+Run this one-time installer from extracted bridge A before `harden-edge`. The
+first command is a dry run; the second is the applying form and performs one
+controlled `docker.service` restart:
 
 ```bash
-sudo /srv/cometa-bank/releases/<release-id>/deploy/standalone/scripts/host-preflight.sh \
-  --ssh-port 22
+sudo /srv/cometa-bank/releases/<bridge-a>/deploy/standalone/scripts/install-docker-perimeter.sh
+sudo /srv/cometa-bank/releases/<bridge-a>/deploy/standalone/scripts/install-docker-perimeter.sh --apply
 ```
 
-The preflight rejects password-capable SSH, unexpected UFW rules, unsupported
-Docker/Compose versions, and any public TCP listener outside the actual SSH port
-plus 80/443. The provider firewall should independently expose the same ports.
+The installer requires Docker Engine 28 or newer and refuses Docker CLI target
+overrides. It binds the daemon to the systemd-owned local Unix socket through
+the single `-H fd://` host, installs the exact versioned
+`deploy/standalone/docker/daemon.json`, and then proves the original web and bot
+container identities, restart counts, images, networks, loopback ports, SQLite
+database, and both HTTPS boundaries for 31 continuous seconds.
 
-## 3. Prepare before DNS cutover
+The restart is protected by a root-only durable journal at
+`/etc/docker/.cometa-bank-perimeter.pending`. The journal records the source
+hash, original current release, exact container/restart identities, whether the
+config was originally absent, and an `install` or `rollback` phase. Atomic
+producer candidates use the exact `.pending.next` and
+`daemon.json.cometa-bank.next` paths. An applying rerun may finish or discard
+only an unambiguous, root-owned, non-writable candidate; unexpected files,
+owners, shapes, phases, concurrent recovery markers, or mixed state fail closed
+for manual inspection. If the safe restart fails after settling, the recorded
+rollback phase restores the original absent-config state and revalidates the
+same application perimeter before retiring the journal.
+
+## Controlled Irena bridge
+
+The live C/D directories were manually patched to loopback ports. They are
+runtime-compatible with Caddy but are not source-clean and still contain the
+old Certbot-aware operator script. Replace both rollback slots in one
+maintenance cycle:
+
+1. Extract both A and B. From A, dry-run and apply
+   `install-docker-perimeter.sh`; this includes one controlled Docker restart.
+2. From A, validate the legacy edge with `harden-edge`, then apply the
+   target-scoped hardening only after the deploy confirmation.
+3. Run strict host preflight for both releases and `prepare` both before
+   activating either.
+4. Keep the persisted ledger mode `local`; do not import a bank snapshot.
+5. Activate A, inspect health, then activate B without an ordinary rollback or
+   unrelated lifecycle operation between them.
+6. Confirm B is `current`, A is `previous`, both image manifests match, and
+   inner plus outer smoke pass.
 
 ```bash
-sudo /srv/cometa-bank/releases/<release-id>/deploy/standalone/scripts/release.sh prepare
-curl --fail --header 'Host: euphoria.bot' http://<new-server-ip>/
+sudo /srv/cometa-bank/releases/<bridge-a>/deploy/standalone/scripts/install-docker-perimeter.sh
+sudo /srv/cometa-bank/releases/<bridge-a>/deploy/standalone/scripts/install-docker-perimeter.sh --apply
+sudo /srv/cometa-bank/releases/<bridge-a>/deploy/standalone/scripts/release.sh harden-edge
+sudo /srv/cometa-bank/releases/<bridge-a>/deploy/standalone/scripts/release.sh harden-edge --apply
+sudo /srv/cometa-bank/releases/<bridge-a>/deploy/standalone/scripts/host-preflight.sh --ssh-port 22
+sudo /srv/cometa-bank/releases/<bridge-b>/deploy/standalone/scripts/host-preflight.sh --ssh-port 22
+sudo /srv/cometa-bank/releases/<bridge-a>/deploy/standalone/scripts/release.sh prepare
+sudo /srv/cometa-bank/releases/<bridge-b>/deploy/standalone/scripts/release.sh prepare
+sudo /srv/cometa-bank/releases/<bridge-a>/deploy/standalone/scripts/release.sh activate
+sudo /srv/cometa-bank/releases/<bridge-b>/deploy/standalone/scripts/release.sh activate
+sudo /srv/cometa-bank/current/deploy/standalone/scripts/release.sh status
+sudo /srv/cometa-bank/current/deploy/standalone/scripts/release.sh ledger-mode status
 ```
 
-`prepare` builds release-labelled local images with registry pulls disabled at
-runtime. On the first install it starts only an HTTP SPA/ACME preview; the bot
-token is not needed and the old production origin remains untouched.
+`harden-edge` first proves that both target Caddy routes are either fully legacy
+or fully strict and that the Nginx real-IP block is absent or exact. It validates
+both candidates before mutation, removes bypasses only inside the two Cometa
+blocks, preserves unrelated host route blocks, and changes the shared Caddy
+protocol policy to host-wide `h1/h2`. It also disables Caddy config persistence
+and moves the admin API from legacy loopback TCP to the caddy-owned Unix socket
+with mode `0200`. The transition reloads through whichever exact admin endpoint
+is currently live, then requires the post-reload endpoint, listener owner, and
+canonical live config to match the installed file. It recreates only the web
+container because the Nginx policy is a single-file bind mount. Recovery copies
+live under a root-only state directory and survive a failed automatic restore.
+Their marker binds the immutable operator release, original current release and
+both snapshot hashes; the snapshots are flushed before the marker is published.
+While that marker exists, every other lifecycle action fails closed. Injected
+apply, recovery, hash-tamper and interrupted-retry cases prove that the originals
+remain recoverable. Re-running the recorded operator's `--apply` reconciles a
+crash between atomic file replacement and runtime reload even if web is absent.
 
-## 4. Change DNS and enable TLS
-
-Point the apex and `www` A records to the new IPv4. Remove stale AAAA records,
-or point both names to the VPS IPv6 and pass it explicitly. After public DNS
-converges:
+If A activation fails, its new script restores the prior runtime. If an explicit
+A-to-legacy rollback is required, continue every operator command through A's
+immutable path until A/B is restored; A hardens the legacy Nginx config before
+installing it:
 
 ```bash
-sudo /srv/cometa-bank/releases/<release-id>/deploy/standalone/scripts/release.sh \
-  issue-certificate \
-  --no-email \
-  --server-ipv4 <new-server-ip>
+sudo /srv/cometa-bank/releases/<bridge-a>/deploy/standalone/scripts/release.sh status
 ```
 
-The command refuses mixed DNS, validates certificate expiry, both SANs, and the
-certificate/private-key pair and trust chain before testing Nginx and switching
-to HTTPS. Use `--email <acme-contact-email>` instead of `--no-email` when an ACME
-contact address is available. It returns to a verified HTTP preview if the TLS
-container does not become healthy.
+Never run lifecycle commands from legacy C or D during this window: those
+scripts can revive the retired renewal owner. After B succeeds, ordinary
+`current`-based operations and B-to-A-to-B rollback are source-clean again.
 
-## 5. Rotate the bot token and activate
+Activation verifies immutable image IDs, creates and checks an online SQLite
+backup, tests candidate and rollback images against a copy, requires 31
+continuous healthy seconds with zero restarts, and probes both boundaries:
 
-Revoke the token previously exposed in chat and generate a new token in
-BotFather. Never place it in chat, an environment variable, a command argument,
-or a project file. The installer reads it from hidden TTY, validates `getMe`
-against `@MyBankApp_Bot`, and writes a service-owned `0600` file.
+- inner Nginx at `127.0.0.1:8443` with normal hostname, chain, and expiry checks;
+- outer Caddy at `127.0.0.1:443` with normal certificate verification.
+
+Before a repair or release recreate, the script accepts zero or one running
+container per service but validates every container and named network that
+exists; missing networks can only be recreated from the verified source model.
+Source and runtime must use the exact `bridge` topology:
+`public + edge` for web, `edge + egress` for bot, and an internal `edge` only.
+The Compose project is exactly `cometa-bank`; each container's primary network
+must be one of its attachments, and network driver options contain only the
+declared `enable_icc` value. Direct-routing and custom IPAM drift are rejected.
+After recreate, the strict gate requires exactly one web and bot container with
+the immutable images, exact attachments and loopback bindings; the bot port map
+must remain empty. An interrupted edge-hardening retry may repair a missing web,
+but refuses host mutation unless the release-pinned bot is singular and healthy.
+Activation and
+rollback flush the deployment directory after each symlink rename, so the
+durable intent can reconcile only the recorded before, between or complete pair.
+
+Both probes cover the SPA, release alias, bootstrap, and every authority API
+route exposed by that release. A legacy release is probed only for its legacy
+bootstrap endpoint.
+
+`current` and `previous` are individually atomic symlink replacements. Before
+either two-link activation or rollback commit, the operator writes and flushes a
+root-only intent. A repeated `activate` or `rollback --apply` accepts only the
+three possible interrupted link states, restores the intended runtime/config,
+completes both links, records the audit event, and then retires the intent.
+Rollback recovery is accepted only from the immutable release that was current
+when its intent was armed.
+Other lifecycle commands fail closed while an intent is pending.
+
+## Bot token
+
+The existing test token may remain for the owner-approved test cycle. Before
+any non-test use, revoke it in BotFather and install the replacement through
+the hidden-TTY boundary:
 
 ```bash
 sudo /srv/cometa-bank/releases/<release-id>/deploy/standalone/scripts/release.sh install-token
-sudo /srv/cometa-bank/releases/<release-id>/deploy/standalone/scripts/release.sh activate
 ```
 
-Activation verifies each release tag against its immutable image-ID manifest,
-performs an online SQLite backup, and tests candidate plus rollback images
-against a database copy before touching the live service. The candidate probe
-forces a WAL checkpoint, then the host independently checks SQLite integrity and
-matches the persisted schema contract before the rollback image can open the
-copy. Both releases' immutable images are verified before that probe. Activation
-then requires 31 continuous healthy seconds with zero container restarts,
-verifies the SPA and the JSON bootstrap boundary locally over trusted TLS, then
-commits the release links. `prepare` verifies the currently recorded host-owned
-renewal bundle and rejects pending ACME recovery before upgrading it. The host
-migration journal is written before file replacement, the worker is installed
-before its wrapper, and the immutable source release is recorded only after the
-complete bundle verifies. The first upgrade from the legacy release-local
-entrypoint is allowed only when every installed legacy file still matches
-`current`. It first installs a persistent systemd condition guard, journals the
-timer's enablement, and disables/stops the timer and service. A process kill or
-reboot therefore cannot launch the legacy worker inside the migration window;
-rerunning the same `prepare` resumes the journal and restores the prior timer
-state only after the stable bundle verifies. Later upgrades fail closed on any
-host-file drift.
-Image rollback preserves this newer hardened worker and verifies it against the
-recorded release instead of downgrading it to the rollback target. The wrapper
-and unchanged systemd units still match the newer release sources, so the legacy
-rollback command can safely switch back to that release. Do not remove the
-release named by `state/renewal-bundle.release`. Before every renewal, the
-stable entrypoint independently rejects an incomplete migration and compares
-its entrypoint, worker, service, and timer with that recorded immutable source.
-The worker also takes its Certbot service and volume contract from the recorded
-release, never from a rolled-back `current` symlink.
-Image rollback also keeps the newly validated token; it never revives a
-credential already revoked by BotFather.
-
-`current` and `previous` are each replaced atomically, but Linux cannot rename
-both symlinks and switch Docker runtime in one filesystem transaction. A host
-power loss inside that narrow commit window can require manual reconciliation
-from `deployments.jsonl`; the normal failure paths are checked and automatic.
+The installer validates `getMe` against the configured bot identity and
+atomically writes a UID `10001`, mode `0600` regular file. Image rollback
+preserves the installed file and never restores a revoked credential.
 
 ## Operations
+
+After the clean A/B bridge:
 
 ```bash
 sudo /srv/cometa-bank/current/deploy/standalone/scripts/release.sh status
 sudo /srv/cometa-bank/current/deploy/standalone/scripts/release.sh rollback
 sudo /srv/cometa-bank/current/deploy/standalone/scripts/release.sh rollback --apply
-sudo systemctl status cometa-bank-cert-renew.timer
-sudo systemctl start cometa-bank-cert-renew.service
-sudo /usr/local/sbin/cometa-bank-renew-certificates --recover-only
 ```
 
-The renewal service shares the deployment lock and atomically persists the prior
-Certbot lineage plus served leaf inside the existing `letsencrypt` Docker volume
-at `.cometa-bank-renewal/pending-recovery` before Certbot can mutate that volume.
-This keeps the already-installed host-owned unit byte-identical across image
-rollback; `PrivateTmp` can discard its scratch files without discarding recovery
-state. `SIGINT`, `SIGTERM`, and `SIGHUP` stop the owned Certbot containers and
-roll back immediately. After `SIGKILL` or power loss, the next run reaps only
-containers carrying the expected Compose project/service labels, restores and
-verifies the pending lineage, and only then captures a new baseline. The bundle
-is retired only after expiry, SANs, key pair, system trust, `nginx -t`, reload,
-and SHA-256 served-leaf probes for both SNI hostnames pass. A corrupt or
-unverifiable recovery bundle fails closed for manual repair instead of being
-replaced with a new baseline.
-`prepare`, certificate issuance, activation, and rollback refuse to proceed
-while a deterministic Certbot container or any recovery bundle/staging path is
-present. Run the `--recover-only` command shown above, inspect its result, and
-then rerun the interrupted release command. Recovery-only mode never starts a
-new renewal.
-The first production cycle intentionally omits HSTS until rollback, renewal,
-and real Android/iOS Telegram WebView acceptance have all passed.
+Mutating lifecycle commands, `status`, and ledger-mode gates recheck the Caddy
+edge, loopback runtime, quiesced legacy units, release manifests, service
+health, and both HTTPS boundaries. The non-applying rollback command validates
+the edge and both release source contracts, then prints its plan; the applying
+form runs the full backup, image, health, and smoke gates. App rollback does not
+mutate the public edge or certificate owner.
 
-After activation, open `/mybots` > `@MyBankApp_Bot` > `Bot Settings` >
-`Configure Mini App` > `Enable Mini App` in BotFather, set the Main Mini App URL
-to `https://euphoria.bot/`, and verify the photo and About/Description. Configure
-the menu button with `/setmenubutton`; the bot also synchronizes it per user
-after `/start`. Complete RU and EN onboarding, every currency/name branch,
-opening from the menu button, preference bootstrap, and one pass each in current
-Telegram Android and iOS clients before retiring the old VPS.
+## Enable server ledger authority
+
+Only enable authority after A and B are both live-compatible rollback targets
+and both real Telegram profiles have persisted the expected compiled client
+marker.
+
+```bash
+sudo /srv/cometa-bank/current/deploy/standalone/scripts/release.sh ledger-mode status
+sudo /srv/cometa-bank/current/deploy/standalone/scripts/release.sh ledger-mode server
+sudo /srv/cometa-bank/current/deploy/standalone/scripts/release.sh ledger-mode server --apply
+```
+
+The dry run repeats the complete preflight. `--apply` creates a root-only,
+WAL-safe SQLite backup, verifies it through both bot images, fsyncs the backup
+and audit journal, switches the one persisted marker in a parameterized SQLite
+transaction, and restarts the current bot. Startup republishes the mutation
+commands only after the durable `server` marker exists. The operator then
+requires the same 31-second health window and inner/outer API smoke.
+
+There is no command to return to `local`. A failed post-commit audit or health
+gate never reverses authority. Re-running `server --apply` records a durable
+reconciliation event, restarts the bot, and repeats the gates without mutating
+ledger data.
+
+## Acceptance
+
+Server authority is accepted only after two real Telegram profiles prove:
+
+- isolated canonical snapshots and histories;
+- one-off income and expense, including overdraft rejection;
+- monthly recurrence with UTC backfill and future pause behavior;
+- add, adjust, close, and restore account flows;
+- restart and B-to-A-to-B persistence;
+- unchanged device-local web demo data.
+
+Telegram messages, callbacks, and screenshots require separate action-time
+owner confirmation. Add exactly three sanitized real Telegram captures to the
+root README only after these journeys pass. Browser emulation does not replace
+Android and iOS Telegram WebView acceptance.
+
+The same-host SQLite backup is not disaster recovery. Encrypted offsite backup,
+retention monitoring, and an epoch-rotating restore drill are deferred. A later
+task will also move Caddy to loopback HTTP and delete the redundant inner
+certificate, Certbot volume, inactive units, and unreachable legacy renewal
+code after two clean rollback releases are established.

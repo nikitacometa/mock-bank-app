@@ -54,7 +54,7 @@ archive_entry_is_allowed() {
 
   case "${entry}" in
     .dockerignore|package.json|pnpm-lock.yaml|tsconfig.json|tsconfig.app.json|\
-      tsconfig.bot.json|tsconfig.node.json|vite.config.ts|index.html|\
+      tsconfig.bot.json|tsconfig.node.json|vite.config.ts|vite.bot.config.ts|index.html|\
       bot|bot/*|deploy|deploy/*|public|public/*|scripts|scripts/*|src|src/*)
       return 0
       ;;
@@ -225,6 +225,7 @@ declare -a release_inputs=(
   tsconfig.bot.json
   tsconfig.node.json
   vite.config.ts
+  vite.bot.config.ts
   index.html
   bot
   deploy

@@ -18,10 +18,20 @@ export interface ExchangeRateSnapshot {
 }
 
 export type AccountType = 'checking' | 'savings';
+export type AccountRole =
+  | 'primary-checking'
+  | 'primary-savings'
+  | 'companion-1'
+  | 'companion-2'
+  | 'custom';
+export type AccountStatus = 'active' | 'closed';
 
 export interface Account {
   id: string;
   type: AccountType;
+  role: AccountRole;
+  status: AccountStatus;
+  closedAt?: string;
   name: string;
   currency: Currency;
   /** Mock account requisites shown on the details screen. */
@@ -40,7 +50,10 @@ export type TransactionKind =
   | 'transfer_contact'
   | 'interest'
   | 'topup'
-  | 'seed';
+  | 'seed'
+  | 'manual_income'
+  | 'manual_expense'
+  | 'balance_adjustment';
 
 export type TransactionStatus = 'posted' | 'pending';
 
@@ -82,10 +95,18 @@ export interface Transaction {
   transferGroupId?: string;
   /** Present on both legs of a cross-currency own-account transfer. */
   fxSnapshot?: Readonly<TransactionFxSnapshot>;
+  /** Optional user-authored detail, normalized and validated at the command boundary. */
+  note?: string;
+  /** User-selected banking date. Append order remains `seq`/`createdAt`. */
+  effectiveDate?: string;
+  recurringRuleId?: string;
+  /** Stable monthly occurrence identity: `${ruleId}:${YYYY-MM}`. */
+  occurrenceKey?: string;
   createdAt: string;
 }
 
 export type CardDesign = 'midnight' | 'ivory' | 'mint';
+export type CardFreezeReason = 'manual' | 'account_closed';
 
 export interface Card {
   id: string;
@@ -97,7 +118,47 @@ export interface Card {
   expiry: string;
   design: CardDesign;
   status: 'active' | 'frozen';
+  freezeReason?: CardFreezeReason;
 }
+
+export type RecurringDirection = 'income' | 'expense';
+export type RecurringPauseReason =
+  | 'manual'
+  | 'account_closed'
+  | 'capacity'
+  | 'overflow'
+  | 'insufficient_funds';
+
+export interface RecurringRule {
+  id: string;
+  accountId: string;
+  direction: RecurringDirection;
+  /** Positive magnitude in the account currency's minor units. */
+  amountMinor: Money;
+  counterparty: string;
+  note?: string;
+  category: string;
+  cadence: 'monthly';
+  /** Original billing day, 1..31. Month-end clamps never mutate it. */
+  anchorDay: number;
+  /** First clamped occurrence, YYYY-MM-DD. */
+  startsOn: string;
+  /** First occurrence not materialized yet, YYYY-MM-DD. */
+  nextOccurrence: string;
+  status: 'active' | 'paused';
+  pauseReason?: RecurringPauseReason;
+  createdAt: string;
+}
+
+export type DemoFixtureId =
+  | 'owner-kzt-v1'
+  | 'synthetic-thb-v1'
+  | 'synthetic-vnd-v1'
+  | 'synthetic-rub-v1'
+  | 'synthetic-usd-v1'
+  | 'synthetic-eur-v1'
+  | 'synthetic-idr-v1'
+  | 'synthetic-gel-v1';
 
 export interface Contact {
   id: string;
@@ -113,6 +174,9 @@ export interface Profile {
 
 export interface BankState {
   primaryCurrency: Currency;
+  /** Currency used to construct the fixture; independent from reporting preference. */
+  demoBaseCurrency: Currency;
+  fixtureId: DemoFixtureId;
   exchangeRates: ExchangeRateSnapshot;
   accounts: Account[];
   transactions: Transaction[];
@@ -123,4 +187,5 @@ export interface BankState {
   nextSeq: number;
   /** Ring buffer of recent clientTransferIds — transfer idempotency. */
   recentTransferIds: string[];
+  recurringRules: RecurringRule[];
 }

@@ -6,7 +6,16 @@ function telegramPlatform(): PlatformAdapter {
   return {
     isTelegram: true,
     getCurrentUser: () => ({ displayName: 'Ada', source: 'host' }),
-    loadLaunchPreferences: async () => null,
+    loadLaunchState: async () => null,
+    importBankState: async () => {
+      throw new Error('unexpected import');
+    },
+    executeBankCommand: async () => {
+      throw new Error('unexpected command');
+    },
+    refreshBankRates: async () => {
+      throw new Error('unexpected rate refresh');
+    },
     haptic() {},
     copyText: async () => false,
     mainButton: { supported: false, show() {}, hide() {} },

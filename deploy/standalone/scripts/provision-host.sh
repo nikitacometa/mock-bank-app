@@ -3,6 +3,10 @@ set -Eeuo pipefail
 
 readonly deploy_root="${COMETA_DEPLOY_ROOT:-/srv/cometa-bank}"
 readonly bot_uid='10001'
+readonly minimum_docker_major='28'
+script_directory="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly script_directory
+readonly docker_cli_config_directory="${script_directory}/../docker-cli"
 apply=false
 confirmed_key_login=false
 ssh_port=''
@@ -20,6 +24,20 @@ fail() {
   exit 1
 }
 
+assert_no_docker_cli_target_overrides() {
+  [[ -z "${DOCKER_HOST+x}" ]] || fail 'Docker CLI target override is forbidden: DOCKER_HOST'
+  [[ -z "${DOCKER_CONTEXT+x}" ]] || fail 'Docker CLI target override is forbidden: DOCKER_CONTEXT'
+  [[ -z "${DOCKER_CONFIG+x}" ]] || fail 'Docker CLI target override is forbidden: DOCKER_CONFIG'
+}
+
+local_docker() {
+  env -u DOCKER_HOST -u DOCKER_CONTEXT -u DOCKER_CONFIG \
+    /usr/bin/docker \
+      --config "${docker_cli_config_directory}" \
+      --host unix:///run/docker.sock \
+      "$@"
+}
+
 log() {
   printf '[%s] %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$*" >&2
 }
@@ -29,8 +47,8 @@ usage() {
     'Usage: provision-host.sh --check' \
     '       provision-host.sh --apply --ssh-port PORT --confirmed-key-login' \
     '' \
-    'The apply mode installs Docker from its official apt repository, installs' \
-    'host probes, prepares /srv/cometa-bank, and enables a default-deny UFW policy.'
+    'The apply mode installs Docker and Caddy from their official apt repositories,' \
+    'installs host probes, prepares /srv/cometa-bank, and enables a default-deny UFW policy.'
 }
 
 while (( $# > 0 )); do
@@ -64,6 +82,10 @@ done
 
 [[ "${deploy_root}" == /* && "${deploy_root}" != '/' && "${deploy_root}" != *'..'* ]] || \
   fail 'COMETA_DEPLOY_ROOT must be a narrow absolute path without ..'
+assert_no_docker_cli_target_overrides
+[[ -f "${docker_cli_config_directory}/config.json" && \
+  ! -L "${docker_cli_config_directory}/config.json" ]] || \
+  fail 'versioned empty Docker CLI config is missing or symlinked'
 if [[ "${apply}" == true ]]; then
   (( EUID == 0 )) || fail 'run --apply through sudo'
   [[ "${ssh_port}" =~ ^[0-9]{1,5}$ ]] || fail '--ssh-port is required and must be numeric'
@@ -86,17 +108,17 @@ case "$(dpkg --print-architecture)" in
 esac
 
 if [[ "${apply}" != true ]]; then
-  for command_name in curl dig docker flock openssl sqlite3 ss ufw; do
+  for command_name in caddy curl dig docker flock jq openssl sqlite3 ss ufw; do
     if command -v "${command_name}" >/dev/null 2>&1; then
       log "found ${command_name}"
     else
       log "missing ${command_name}"
     fi
   done
-  if command -v docker >/dev/null 2>&1; then
-    docker version --format 'Docker server {{.Server.Version}}' 2>/dev/null || \
+  if [[ -x /usr/bin/docker ]]; then
+    local_docker version --format 'Docker server {{.Server.Version}}' 2>/dev/null || \
       log 'Docker CLI exists but the daemon is unavailable'
-    docker compose version 2>/dev/null || log 'Docker Compose plugin is unavailable'
+    local_docker compose version 2>/dev/null || log 'Docker Compose plugin is unavailable'
   fi
   ss -lntup
   exit 0
@@ -104,9 +126,22 @@ fi
 
 log 'installing host prerequisites'
 apt-get update
-apt-get install -y ca-certificates curl dnsutils gnupg openssl sqlite3 ufw
+apt-get install -y \
+  apt-transport-https \
+  ca-certificates \
+  curl \
+  debian-archive-keyring \
+  debian-keyring \
+  dnsutils \
+  gnupg \
+  jq \
+  openssl \
+  sqlite3 \
+  ufw
 
-if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
+if [[ ! -x /usr/bin/docker ]] || \
+  ! dpkg-query -W -f='${Status}\n' docker-compose-plugin 2>/dev/null | \
+    grep -Fqx 'install ok installed'; then
   log 'installing Docker Engine from the official apt repository'
   install -d -m 0755 /etc/apt/keyrings
   curl \
@@ -136,9 +171,54 @@ if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>
   apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 fi
 
+if ! command -v caddy >/dev/null 2>&1; then
+  log 'installing Caddy from the official apt repository'
+  temporary_source="$(mktemp)"
+  curl \
+    --fail \
+    --silent \
+    --show-error \
+    --location \
+    --proto '=https' \
+    --tlsv1.2 \
+    https://dl.cloudsmith.io/public/caddy/stable/gpg.key \
+    --output "${temporary_source}"
+  gpg --dearmor --yes \
+    --output /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
+    "${temporary_source}"
+  chmod o+r /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+  rm -f -- "${temporary_source}"
+  temporary_source=''
+
+  temporary_source="$(mktemp)"
+  curl \
+    --fail \
+    --silent \
+    --show-error \
+    --location \
+    --proto '=https' \
+    --tlsv1.2 \
+    https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt \
+    --output "${temporary_source}"
+  install -m 0644 "${temporary_source}" /etc/apt/sources.list.d/caddy-stable.list
+  rm -f -- "${temporary_source}"
+  temporary_source=''
+
+  apt-get update
+  apt-get install -y caddy
+fi
+
 systemctl enable --now docker
-docker version --format 'Docker server {{.Server.Version}}'
-docker compose version
+systemctl enable --now caddy.service
+docker_engine_version="$(local_docker version --format '{{.Server.Version}}')" || \
+  fail 'Docker daemon is unavailable after installation'
+[[ "${docker_engine_version}" =~ ^([0-9]+)([.][0-9]+){0,2}([+~-].*)?$ ]] || \
+  fail "Docker returned an unsupported version: ${docker_engine_version}"
+(( 10#${BASH_REMATCH[1]} >= 10#${minimum_docker_major} )) || \
+  fail "Docker Engine 28.0.0 or newer is required for loopback-only published ports; found ${docker_engine_version}"
+printf 'Docker server %s\n' "${docker_engine_version}"
+local_docker compose version
+caddy version
 
 log "preparing ${deploy_root}"
 install -d -m 0755 -o root -g root \

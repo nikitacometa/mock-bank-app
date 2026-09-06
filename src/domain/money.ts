@@ -217,3 +217,12 @@ export function parseAmountInput(
 ): Money | null {
   return parseDecimalToMinor(raw, currency, false, locale);
 }
+
+/** Parse a non-negative balance target; unlike transaction amounts, zero is valid. */
+export function parseBalanceInput(
+  raw: string,
+  currency: Currency = CURRENCY,
+  locale: MoneyLocale = 'ru',
+): Money | null {
+  return parseDecimalToMinor(raw, currency, true, locale);
+}

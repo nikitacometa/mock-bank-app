@@ -1,10 +1,12 @@
 # Cometa (kaspy-bank-telegram)
 
-Минималистичный mock-необанк уровня «премиальный прод 2026»: ровно четыре demo-счёта
-(два KZT, один USD и один EUR), закрытый набор из восьми поддерживаемых валют,
-настраиваемая основная валюта, накопительный счёт с процентом, live reference rates,
-история, мок-карты и переводы. Все банковские данные — клиентский мок.
-Приложение работает как mobile-first веб-SPA и содержит Telegram Mini App adapter.
+Минималистичный mock-необанк уровня «премиальный прод 2026»: fresh fixture начинает с четырёх
+demo-счетов, поддерживает восемь валют, настраиваемую основную валюту, накопительный счёт с
+процентом, live reference rates, историю, мок-карты, переводы, ручные и recurring операции.
+Обычный web хранит mock-ledger локально. Local Telegram candidate реализует server-authoritative
+mock-ledger отдельно для каждого canonical Telegram ID; live release остаётся device-local до
+двухрелизного bridge и explicit one-way switch. Это всё ещё вымышленное демо без реальных денег и
+payment rails.
 Полная спека: `docs/spec.md`
 (читать ПЕРВОЙ — там архитектура, отвергнутые подходы с причинами, майлстоуны с AC).
 Хендофф-статус: `docs/handoff.md`. Ресёрч-база (дайджест, red team, user-lens): `docs/research/`.
@@ -52,7 +54,7 @@ pnpm test           # vitest
   `AbortError`. Ошибка уже начатого callback никогда не ретраится. `settleNow()` обязан rebase
   свежий persisted state даже в no-accrual ветке, а `setPrimaryCurrency()` — даже если валюта уже
   выбрана; foreground и persisted `pageshow` вызывают resync. Persistence parser возвращает точную
-  проекцию девяти `BankState`-полей: неизвестные persisted keys не могут заменить actions/status.
+  проекцию двенадцати `BankState`-полей: неизвестные persisted keys не могут заменить actions/status.
 - **Platform seam**: `window.Telegram` / голый `localStorage` — только внутри `src/platform/**`
   и `src/store/persistence.ts` (ESLint-гард); `env(safe-area-inset-*)` и `100vh/dvh` — только
   в `tokens.css` / `platform/` (`scripts/check-css-guards.sh`). Экраны говорят с платформой
@@ -73,6 +75,24 @@ pnpm test           # vitest
   (`epochDayUTC`), никаких таймеров и «тикающих» display-значений. Persistence не принимает
   `accrualAnchor` раньше UTC-дня создания счёта и preflight'ит реальный settlement на load;
   runtime settlement failure логируется и не превращается в unhandled rejection.
+- **Ручные и recurring операции**: income/expense и monthly rules доступны только active checking
+  accounts; expense и весь historical backfill не могут увести счёт ниже нуля. Monthly anchor
+  выбирается как UTC year/month/day, backfill ограничен 120 строками и применяется атомарно.
+  Savings допускает только current balance adjustment после settlement; adjustment всегда новая
+  ledger row, а не поле на account.
+- **Canonical import and rates**: strict import rejects future immutable timestamps, recurrence
+  outside its UTC window, invalid role/type/base-currency mapping and duplicate active checking
+  currencies. Parser строит exact deep projection всех nested state-объектов до hash/storage;
+  неизвестные nested keys не входят в canonical state. Server FX parsing caps decoded responses at 256 KiB/64 rows, shares a 12-hour cache
+  plus 30-second failure cooldown, and charges every `/bank-rates` request against a dedicated
+  non-replayable budget. Command/import rate-limit bypass is allowed only for an exact operation
+  already persisted in SQLite; invalid, conflicting and crash-before-commit retries are charged
+  again. A committed domain failure is a stored replay outcome and keeps the exemption.
+  Authenticated bootstrap имеет отдельный per-ID лимит 30/min после HMAC validation, но до любого
+  SQLite lookup; replay exemption для него запрещён.
+- **Account lifecycle**: удаление означает reversible close при нулевом balance. История остаётся;
+  связанные rules pause, cards freeze, restore возвращает только автоматически остановленные
+  сущности. Fresh fixture имеет четыре role-account, после чего пользователь может add/close/restore.
 - **Crash recovery**: ErrorBoundary reset сначала пересоздаёт bank state, затем `resetUi()`
   возвращает Home/checking и очищает sheet/toast queue до remount. Иначе sheet-specific crash
   зацикливает fallback. Crash message — единственный `role=alert`, recovery button получает focus.
@@ -132,21 +152,34 @@ pnpm test           # vitest
   текущие Android/iOS clients ещё обязательны. Unit tests и browser emulation их не заменяют.
   Чеклист и грабли: `docs/research/digest.md`
   (линза 3).
-- Web-storage и TMA-storage изолированы — состояние демо НЕ переносится, это ожидаемо. В TMA bank,
-  locale и receipt лежат в отдельных namespace по canonical Telegram ID. До HMAC-verified bootstrap
+- Web-storage и TMA-storage изолированы — состояние демо НЕ переносится, это ожидаемо. В TMA cached
+  bank snapshot, locale и receipts лежат в отдельных namespace по canonical Telegram ID. До HMAC-verified bootstrap
   используется только ephemeral quarantine: unknown/malformed host identity не читает и не пишет
   чужой snapshot. `storage` events принимаются только из активного namespace; failed same-ID write
   остаётся in-memory authoritative до успешного retry.
+- Смена fingerprint raw Telegram launch session открывает новый identity epoch до чтения возможно
+  stale parsed SDK user. Старые in-flight sync результаты не выпускают namespace из quarantine.
+  Обычный same-user foreground sync не вызывает `resetUi()`: canonical adoption сохраняет валидные
+  screen/sheet/draft/toasts, но закрывает stale account/card/transfer target. Namespace switch
+  остаётся полной transient-UI boundary.
 - Raw `initData` валидирует только bot backend через Telegram HMAC и freshness bound. Frontend
   применяет только versioned bootstrap response с canonical `telegramId`, locale, currency,
   display name, monotonic revision и lowercase 128-bit `revisionEpoch`. Receipt v2 привязан к
   Telegram user + epoch + BankState schema; новый DB epoch имеет приоритет даже при меньшем
   revision. Смена Telegram account сначала изолирует UI, затем восстанавливает собственный snapshot
   или reseed'ит собственный mock ledger после server verification.
-- Bot backend хранит Telegram/private-chat ID, locale, primary currency, display name, onboarding
-  stage, revision + epoch, exact processed-update window и durable pending reply до доставки или
-  окончательного отклонения. Банковские счета/ledger/карты на сервер не уходят. `/privacy`
-  раскрывает эту границу на RU/EN.
+- После one-time create-if-absent import Telegram mock-ledger authoritative в SQLite. Bot и TMA
+  отправляют typed idempotent commands; canonical server materializer всегда выполняет
+  `applySettleAll` до recurring rules под repository lock, валидирует полный
+  next state до commit и возвращает digest + monotonic revision. Sticky authority marker запрещает
+  local-write fallback. Первый импортированный device snapshot становится canonical; отличающаяся
+  локальная копия второго device требует явного `Use server copy`. Bootstrap и bot chat reads идут
+  через тот же materializer; повтор в один UTC-день не дублирует строки и не повышает revision.
+- Bot backend хранит Telegram/private-chat ID, locale, display name, onboarding state, server bank
+  snapshot, operation/outbox records и durable conversation draft отдельно для каждого пользователя.
+  Следующий wizard session и его `conversation_replies` receipt пишутся одной SQLite transaction;
+  delivery status и `update_processed` завершаются независимо, а retention покрывает оба crash order.
+  `/privacy` раскрывает эту границу на RU/EN. Секреты и raw initData не пишутся в SQLite/logs.
 - Bot profile/setup API calls выполняются последовательно; transient network/429/5xx failures имеют
   bounded retries с Telegram `retry_after`, permanent 4xx fail closed. Exact-ID dedupe не считает
   меньший случайный `update_id` старым: после шести суток без update sequence offset сбрасывается
@@ -159,26 +192,74 @@ pnpm test           # vitest
 
 - Deploy target: dedicated Irena VPS (`ssh irena`) + `euphoria.bot`; runtime root —
   `/srv/cometa-bank`. Release `20260902T233133Z` active/healthy, identical-source release
-  `20260902T233104Z` is automatic previous; D→C→D rollback rehearsal and the real systemd renewal
-  service passed. Legacy Hostinger remains the TLS-valid external rollback origin until Android/iOS
-  acceptance. System, Cloudflare, Google and Quad9 resolvers converge on Irena.
-  Перед изменением live traffic обязательны read-only preflight,
-  prepared HTTP origin, точная DNS-проверка и сохранённый Hostinger rollback. Первый Irena vhost
-  намеренно без HSTS; включать его можно только после полного renewal→reload→served-SNI цикла.
-- Standalone deploy идёт только через `deploy/standalone/scripts/release.sh`: immutable image-ID
-  manifest, serialized deploy/renew lock, health stability window и atomic `current`/`previous`.
-  Bot не публикует host port; Nginx — единственный public edge на 80/443. Certificate renewal
-  исполняет root-owned worker, привязанный record-файлом к immutable source release, а не к
-  откатываемому `current`. Legacy migration использует persistent systemd guard + timer journal;
-  pending recovery, deterministic orphan или Docker metadata error блокируют prepare/activate/
-  rollback до успешного `--recover-only`. App rollback не понижает hardened renewal worker.
+  `20260902T233104Z` is automatic previous; D→C→D rollback rehearsal passed before the host edge
+  changed. Live source copies C/D were later manually patched to loopback ports and therefore are
+  rollback-compatible but not source-clean. Caddy `2.11.4` is now the sole enabled public TLS owner
+  on TCP `80/443`; Docker web binds only `127.0.0.1:8080/8443`, and Caddy temporarily proxies the
+  complete Nginx HTTPS policy on `8443`. Read-only audit found the installed bridge still using a
+  target TLS bypass/default HTTP/3, the legacy TCP Caddy admin endpoint and Nginx without trusted
+  real-IP recovery. Docker still runs without the versioned daemon config. None of the current
+  candidate infrastructure has been applied to production.
+  The legacy Certbot timer is disabled/inactive and its service is static/inactive. Do not re-enable
+  either unit. Legacy Hostinger remains the TLS-valid external
+  rollback origin until Android/iOS acceptance. System, Cloudflare, Google and Quad9 resolvers
+  converge on Irena. The first Irena vhost deliberately omits HSTS.
+- Release lifecycle идёт только через `deploy/standalone/scripts/release.sh`; one-time Docker
+  daemon perimeter ставится отдельным `deploy/standalone/scripts/install-docker-perimeter.sh`:
+  immutable image-ID
+  manifest, serialized deploy lock, health stability window и atomic `current`/`previous`. Active
+  lifecycle commands require valid Caddy semantics, Caddy-owned public listeners, exact loopback
+  Compose/runtime bindings and bridge-network attachments, exact trusted real-IP directives,
+  TCP-only `h1/h2` and quiesced legacy
+  renewal units. Inner `8443` uses normal chain/hostname verification plus a 21-day expiry floor;
+  outer `443` is a separate gate. Active flows never issue certificates or install/enable the old renewal bundle;
+  Caddy owns public ACME. Docker Engine 28+ and `jq` are explicit host dependencies. Runtime uses the
+  exact `cometa-bank` project, attached primary networks and an allow-listed bridge option set. Bot
+  never publishes a host port. Before any release lifecycle action, the one-time
+  `install-docker-perimeter.sh` dry-run/apply must install the exact three-key
+  `/etc/docker/daemon.json`, keep only systemd socket activation through `-H fd://`, pin the local
+  Unix-socket CLI context and complete its controlled Docker restart under a root-only durable
+  recovery journal. Exact `.pending.next`/`daemon.json.cometa-bank.next` candidates are recoverable
+  only when their owner, mode and shape are unambiguous; any mixed or unknown state fails closed.
+  Do not replace `/etc/caddy/Caddyfile` merely for byte parity: validate its scoped `euphoria.bot`
+  routes because the host may serve unrelated domains.
+- The first compatible release cycle is controlled: package/prepare two identical-source releases
+  A and B; from extracted A run `install-docker-perimeter.sh` dry-run/apply, then target-scoped
+  `harden-edge` dry-run/apply, strict-preflight both, prepare both before activating A, then activate
+  them consecutively while ledger mode remains `local`. Docker installation requires Engine 28+
+  and intentionally restarts only `docker.service`. Edge hardening applies host-wide `h1/h2`,
+  authenticates inner TLS, moves Caddy admin from loopback TCP to a caddy-owned Unix socket with
+  mode `0200`, disables persisted autosave and reloads through the endpoint that is currently live.
+  Edge mutation keeps durable root-only, hash-bound recovery snapshots and globally blocks other
+  lifecycle actions while its marker exists. Activation and rollback flush a link intent before the
+  two symlink writes, fsync between writes and reconcile only the three valid interrupted states.
+  Retry preflight permits a missing web/bot runtime only after source and any existing containers or
+  named networks pass the exact perimeter; strict cardinality, image, health and TLS checks run after repair.
+  Pending edge-hardening recovery permits only web absence and requires a healthy immutable bot before
+  host mutation. Rollback intent is consumable only by its original-current release script.
+  Until B succeeds, use A's immutable `releases/<A>/.../release.sh` as the canonical operator if a
+  fallback restores legacy D; never run legacy D/C lifecycle commands. Once B is current and A is
+  previous, both rollback targets are source-clean. Removing inner Nginx TLS, the Certbot volume and
+  dead legacy renewal code is a later milestone, not part of this bridge.
+- Server ledger включается только после двух authority-capable releases через guarded
+  `release.sh ledger-mode server --apply`. Переход односторонний; после него activate/rollback на
+  pre-authority image запрещён. `/app/<release-id>/` — rollback-safe cache-key alias на current web
+  image; доказательством build служит compiled client-contract marker, а не текст URL. Если final
+  audit flush упал уже после switch, повторный `server --apply` пишет durable reconciliation event и
+  повторяет health gates без ledger mutation. Пока mode `local`, setup и `/help` публикуют только
+  `start/settings/help/privacy`. После durable final event operator restart'ит current bot, startup
+  публикует server command profiles, затем обязательны 31 секунд stable health и TLS/API smoke;
+  reconciliation повторяет restart и gates. Authority candidate пока не deployed и live DB не
+  переключён. Hostinger остаётся только static/TLS fallback и не
+  может быть Telegram ledger authority. Encrypted offsite backup/restore drill отложен; локальные
+  root-only SQLite backups не являются защитой от потери VPS.
 - Bot token принимается только через hidden TTY prompt и service-owned file boundary; token запрещён
   в `.env`, argv, shell history, docs и chat. Owner-authorized exposed token сейчас допускается только
   для test acceptance и обязан быть revoke/rotate до любого public/non-test use; не считать это
   прецедентом для следующих credentials.
-- Private GitHub remote: `git@github.com:nikitacometa/mock-bank-app.git`; `main` отслеживает
-  `origin/main`. Не менять visibility на public, пока fingerprintable statement fixture не заменён
-  shifted/synthetic dataset и operational docs не пройдут отдельный disclosure review.
+- Public GitHub remote: `git@github.com:nikitacometa/mock-bank-app.git`; `main` отслеживает
+  `origin/main`. Owner-KZT fixture остаётся fingerprintable несмотря на удалённые PII; этот риск
+  обязан быть явно описан и не позволяет называть dataset анонимным.
 - Имя в UI — «Cometa» (`src/app/config.ts`). «Kaspy» не использовать в UI: риск Kaspi Bank +
   скам-паттерн FEMITBOT (spec.md §7). Демо-водяной знак и disclaimer не удалять.
 

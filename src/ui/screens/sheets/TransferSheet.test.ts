@@ -4,6 +4,7 @@ import { act, createElement, StrictMode, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { balanceOf } from '@/domain/ledger';
+import { applyAddAccount } from '@/domain/accountLifecycle';
 import { formatMoney } from '@/domain/money';
 import { buildSeed, CHECKING_ID, SAVINGS_ID } from '@/domain/seed';
 import { useBankStore } from '@/store/bankStore';
@@ -392,6 +393,117 @@ describe('transfer balance preflight', () => {
       expect(container.textContent).toContain(
         `${formatMoney(Math.abs(addedRows[1].amountMinor), 'KZT', 'en')} → ${firstName}`,
       );
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      consoleError.mockRestore();
+      useBankStore.setState(previousStore, true);
+      useUiStore.setState(previousUi, true);
+    }
+  });
+
+  it('preserves a custom account name in an own-transfer replay receipt', async () => {
+    const nowISO = '2026-09-02T12:00:00.000Z';
+    const seeded = buildSeed(nowISO);
+    const added = applyAddAccount(seeded, {
+      accountId: 'acc_custom_thb',
+      currency: 'THB',
+      name: 'Current',
+      number: 'CM05THB000000000005',
+      nowISO,
+    });
+    if (!added.ok) throw new Error(added.error);
+    const customAccount = added.state.accounts.find(
+      (account) => account.id === 'acc_custom_thb',
+    );
+    if (customAccount === undefined) throw new Error('Custom account was not added');
+    const pending = {
+      ...added.state,
+      accounts: [
+        added.state.accounts.find((account) => account.id === CHECKING_ID)!,
+        customAccount,
+        ...added.state.accounts.filter(
+          (account) => account.id !== CHECKING_ID && account.id !== customAccount.id,
+        ),
+      ],
+    };
+    const storage = new Map<string, string>([
+      ['cometa.bank', JSON.stringify({ schemaVersion: SCHEMA_VERSION, state: pending })],
+    ]);
+    let failNextSuccessHaptic = true;
+    vi.useFakeTimers();
+    vi.setSystemTime(nowISO);
+    vi.stubGlobal('crypto', {
+      getRandomValues<T extends ArrayBufferView>(target: T): T {
+        new Uint8Array(target.buffer, target.byteOffset, target.byteLength).fill(7);
+        return target;
+      },
+    });
+    vi.stubGlobal('navigator', {
+      vibrate(pattern: number | number[]) {
+        if (
+          failNextSuccessHaptic &&
+          Array.isArray(pattern) &&
+          pattern[0] === 10
+        ) {
+          failNextSuccessHaptic = false;
+          throw new Error('haptic presentation failed');
+        }
+        return true;
+      },
+    });
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => storage.set(key, value)),
+    });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const previousStore = useBankStore.getState();
+    const previousUi = useUiStore.getState();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+
+    try {
+      useBankStore.setState(pending);
+      useUiStore.setState({ ...previousUi, activeAccountId: CHECKING_ID, locale: 'ru' }, true);
+      const ownRowsBefore = pending.transactions.filter(
+        (transaction) =>
+          transaction.kind === 'transfer_own_out' || transaction.kind === 'transfer_own_in',
+      ).length;
+      await act(async () => {
+        root.render(createElement(TransferSheet, { initialMode: 'own' }));
+        await flushEffects();
+      });
+
+      const one = container.querySelector<HTMLButtonElement>('button[aria-label="1"]');
+      if (one === null) throw new Error('Transfer keypad did not render');
+      await act(async () => one.click());
+      const submit = async () => {
+        const button = [...container.querySelectorAll<HTMLButtonElement>('button')]
+          .find((candidate) =>
+            !candidate.disabled && candidate.textContent?.startsWith('Перевести '),
+          );
+        if (button === undefined) throw new Error('Enabled transfer action did not render');
+        await act(async () => {
+          button.click();
+          await flushEffects();
+        });
+      };
+
+      await submit();
+      expect(container.textContent).toContain('Перевод не прошёл. Попробуй ещё раз.');
+      expect(useBankStore.getState().transactions.filter(
+        (transaction) =>
+          transaction.kind === 'transfer_own_out' || transaction.kind === 'transfer_own_in',
+      )).toHaveLength(ownRowsBefore + 2);
+
+      await submit();
+      expect(container.textContent).toContain('→ Current');
+      expect(container.textContent).not.toContain('→ Текущий');
+      expect(useBankStore.getState().transactions.filter(
+        (transaction) =>
+          transaction.kind === 'transfer_own_out' || transaction.kind === 'transfer_own_in',
+      )).toHaveLength(ownRowsBefore + 2);
     } finally {
       await act(async () => root.unmount());
       container.remove();

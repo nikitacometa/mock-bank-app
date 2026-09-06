@@ -1,10 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  CachedExchangeRateProvider,
+  EXCHANGE_RATE_CACHE_MS,
+  EXCHANGE_RATE_RETRY_COOLDOWN_MS,
   ExchangeRateServiceError,
   FRANKFURTER_RATES_URL,
+  MAX_EXCHANGE_RATE_RESPONSE_BYTES,
+  MAX_EXCHANGE_RATE_ROWS,
   fetchExchangeRates,
+  shouldAdoptExchangeRateSnapshot,
   type ExchangeRateFetch,
 } from './exchangeRates';
+import type { ExchangeRateSnapshot } from '@/domain/types';
 
 const FETCHED_AT = '2026-09-01T12:34:56.000Z';
 const AS_OF = '2026-08-31';
@@ -103,6 +110,41 @@ describe('fetchExchangeRates', () => {
       now: fixedNow,
     });
     await expect(invalidSchema).rejects.toMatchObject({ code: 'invalid_payload' });
+  });
+
+  it('rejects declared and streamed response bodies above the decoded-byte limit', async () => {
+    const declaredOversized = new Response('[]', {
+      headers: {
+        'Content-Length': String(MAX_EXCHANGE_RATE_RESPONSE_BYTES + 1),
+        'Content-Type': 'application/json',
+      },
+    });
+    await expect(
+      fetchExchangeRates({ fetchImpl: mockFetch(declaredOversized), now: fixedNow }),
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+
+    const firstChunk = new Uint8Array(MAX_EXCHANGE_RATE_RESPONSE_BYTES);
+    firstChunk.fill(0x20);
+    const streamedOversized = new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(firstChunk);
+        controller.enqueue(new Uint8Array([0x20]));
+        controller.close();
+      },
+    }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    await expect(
+      fetchExchangeRates({ fetchImpl: mockFetch(streamedOversized), now: fixedNow }),
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+  });
+
+  it('rejects provider arrays above the row-count limit before schema traversal', async () => {
+    const rows = Array.from({ length: MAX_EXCHANGE_RATE_ROWS + 1 }, () => null);
+
+    await expect(
+      fetchExchangeRates({ fetchImpl: mockFetch(jsonResponse(rows)), now: fixedNow }),
+    ).rejects.toThrow(`${MAX_EXCHANGE_RATE_ROWS}-row limit`);
   });
 
   it('rejects a response with no complete same-date quote set', async () => {
@@ -252,5 +294,158 @@ describe('fetchExchangeRates', () => {
 
     await assertion;
     expect(requestSignal?.aborted).toBe(true);
+  });
+
+  it('keeps the timeout active while the response body is streaming', async () => {
+    vi.useFakeTimers();
+    let requestSignal: AbortSignal | undefined;
+    const cancel = vi.fn();
+    const response = new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('['));
+      },
+      cancel,
+    }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const fetchImpl: ExchangeRateFetch = vi.fn(async (_input, init) => {
+      requestSignal = init?.signal ?? undefined;
+      return response;
+    });
+
+    const request = fetchExchangeRates({ fetchImpl, now: fixedNow, timeoutMs: 50 });
+    const assertion = expect(request).rejects.toMatchObject({ code: 'timeout' });
+    await vi.advanceTimersByTimeAsync(50);
+
+    await assertion;
+    expect(requestSignal?.aborted).toBe(true);
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('server exchange-rate selection', () => {
+  function snapshot(
+    asOf: string,
+    fetchedAt: string,
+    source: ExchangeRateSnapshot['source'] = 'frankfurter',
+  ): ExchangeRateSnapshot {
+    return {
+      base: 'USD',
+      asOf,
+      fetchedAt,
+      source,
+      rates: {
+        USD: '1',
+        EUR: '0.86',
+        RUB: '86.2',
+        KZT: '462.2',
+        THB: '33.1',
+        VND: '26044',
+        IDR: '17710',
+        GEL: '2.61',
+      },
+    };
+  }
+
+  it('prefers observation date before fetchedAt and rejects future-clock candidates', () => {
+    const now = Date.parse('2026-09-05T12:00:00.000Z');
+    const current = snapshot('2026-09-04', '2026-09-05T10:00:00.000Z');
+
+    expect(shouldAdoptExchangeRateSnapshot(
+      current,
+      snapshot('2026-09-03', '2026-09-05T11:00:00.000Z'),
+      now,
+    )).toBe(false);
+    expect(shouldAdoptExchangeRateSnapshot(
+      current,
+      snapshot('2026-09-04', '2026-09-05T11:00:00.000Z'),
+      now,
+    )).toBe(true);
+    expect(shouldAdoptExchangeRateSnapshot(
+      current,
+      snapshot('2026-09-05', '2026-09-05T12:05:01.000Z'),
+      now,
+    )).toBe(false);
+    expect(shouldAdoptExchangeRateSnapshot(
+      snapshot('2026-08-28', '2026-08-28T12:00:00.000Z', 'fallback'),
+      current,
+      now,
+    )).toBe(true);
+  });
+
+  it('deduplicates concurrent loads and reuses the validated process cache', async () => {
+    let resolveLoad: ((value: ExchangeRateSnapshot) => void) | undefined;
+    const load = vi.fn(() => new Promise<ExchangeRateSnapshot>((resolve) => {
+      resolveLoad = resolve;
+    }));
+    const provider = new CachedExchangeRateProvider(
+      load,
+      () => Date.parse('2026-09-05T12:00:00.000Z'),
+    );
+    const expected = snapshot('2026-09-05', '2026-09-05T12:00:00.000Z');
+
+    const first = provider.get();
+    const second = provider.get();
+    expect(load).toHaveBeenCalledTimes(1);
+    resolveLoad?.(expected);
+    await expect(Promise.all([first, second])).resolves.toEqual([expected, expected]);
+    await expect(provider.get()).resolves.toBe(expected);
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it('shares a failed-load cooldown across sequential users and retries after expiry', async () => {
+    const expected = snapshot('2026-09-05', '2026-09-05T12:00:00.000Z');
+    const failure = new ExchangeRateServiceError('network', 'offline');
+    const load = vi.fn()
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce(expected);
+    let nowMs = Date.parse('2026-09-05T12:00:00.000Z');
+    const provider = new CachedExchangeRateProvider(
+      load,
+      () => nowMs,
+    );
+
+    await expect(provider.get()).rejects.toBe(failure);
+    await expect(provider.get()).rejects.toBe(failure);
+    nowMs += EXCHANGE_RATE_RETRY_COOLDOWN_MS - 1;
+    await expect(provider.get()).rejects.toBe(failure);
+    expect(load).toHaveBeenCalledTimes(1);
+
+    nowMs += 1;
+    await expect(provider.get()).resolves.toBe(expected);
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns a stale last-good snapshot during a regressing-candidate cooldown', async () => {
+    const initialMs = Date.parse('2026-09-05T00:00:00.000Z');
+    let nowMs = initialMs;
+    const current = snapshot('2026-09-04', new Date(initialMs).toISOString());
+    const regressing = snapshot(
+      '2026-09-03',
+      new Date(initialMs + EXCHANGE_RATE_CACHE_MS).toISOString(),
+    );
+    const newer = snapshot(
+      '2026-09-05',
+      new Date(
+        initialMs + EXCHANGE_RATE_CACHE_MS + EXCHANGE_RATE_RETRY_COOLDOWN_MS,
+      ).toISOString(),
+    );
+    const load = vi.fn()
+      .mockResolvedValueOnce(current)
+      .mockResolvedValueOnce(regressing)
+      .mockResolvedValueOnce(newer);
+    const provider = new CachedExchangeRateProvider(load, () => nowMs);
+
+    await expect(provider.get()).resolves.toBe(current);
+    nowMs += EXCHANGE_RATE_CACHE_MS;
+    await expect(provider.get()).resolves.toBe(current);
+    await expect(provider.get()).resolves.toBe(current);
+    nowMs += EXCHANGE_RATE_RETRY_COOLDOWN_MS - 1;
+    await expect(provider.get()).resolves.toBe(current);
+    expect(load).toHaveBeenCalledTimes(2);
+
+    nowMs += 1;
+    await expect(provider.get()).resolves.toBe(newer);
+    expect(load).toHaveBeenCalledTimes(3);
   });
 });

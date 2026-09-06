@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "pnpm build:web && pnpm build:bot",
     "build:web": "tsc -b && vite build",
-    "build:bot": "tsc -p tsconfig.bot.json",
+    "build:bot": "tsc -p tsconfig.bot.json --pretty false && vite build --config vite.bot.config.ts && node --disable-warning=ExperimentalWarning scripts/check-bot-bundle.mjs",
     "preview": "vite preview",
     "start:bot": "node --enable-source-maps bot/dist/main.js",
     "test": "pnpm test:web && pnpm test:bot",

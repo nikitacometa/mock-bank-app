@@ -3,7 +3,13 @@ import { useBankStore } from '@/store/bankStore';
 import { useUiStore } from '@/store/uiStore';
 import type { Transaction } from '@/domain/types';
 import { useI18n, type TranslationKey } from '@/i18n';
-import { categoryLabel, dayKey, fmtDay, localizeDemoText } from '../format';
+import {
+  buildOwnTransferCounterpartIndex,
+  categoryLabel,
+  fmtTransactionDay,
+  transactionCounterpartyDisplayName,
+  transactionDayKey,
+} from '../format';
 import { TxRow } from '../TxRow';
 import { AccountStrip } from '../AccountStrip';
 import { IconSearch } from '../icons';
@@ -31,32 +37,46 @@ export function History() {
   const nextGroupHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const deferredQuery = useDeferredValue(query);
   const { locale, t } = useI18n();
-  const activeAccount = accounts.find((account) => account.id === activeAccountId) ?? accounts[0];
+  const selectedAccount =
+    accounts.find((account) => account.id === activeAccountId) ?? accounts[0];
+  const ownTransferCounterparts = useMemo(
+    () => buildOwnTransferCounterpartIndex(accounts, transactions),
+    [accounts, transactions],
+  );
 
   const groups = useMemo(() => {
+    if (selectedAccount === undefined) return [];
     const q = deferredQuery.trim().toLowerCase();
     const rows = transactions
-      .filter((t) => t.accountId === activeAccount.id)
+      .filter((t) => t.accountId === selectedAccount.id)
       .filter((t) => (filter === 'expense' ? t.amountMinor < 0 : filter === 'income' ? t.amountMinor > 0 : true))
       .filter((t) => {
         if (!q) return true;
         const label = categoryLabel(t.category, locale);
-        const counterparty = localizeDemoText(t.counterparty, locale);
+        const counterparty = transactionCounterpartyDisplayName(
+          t,
+          locale,
+          ownTransferCounterparts,
+        );
+        const note = t.note?.toLocaleLowerCase(locale) ?? '';
         return (
           counterparty.toLocaleLowerCase(locale).includes(q) ||
-          label.toLocaleLowerCase(locale).includes(q)
+          label.toLocaleLowerCase(locale).includes(q) ||
+          note.includes(q)
         );
       })
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.seq - a.seq);
+      .sort((a, b) =>
+        transactionDayKey(b).localeCompare(transactionDayKey(a)) || b.seq - a.seq,
+      );
     const byDay = new Map<string, Transaction[]>();
     for (const t of rows) {
-      const key = dayKey(t.createdAt);
+      const key = transactionDayKey(t);
       const bucket = byDay.get(key);
       if (bucket) bucket.push(t);
       else byDay.set(key, [t]);
     }
     return [...byDay.entries()];
-  }, [transactions, activeAccount.id, deferredQuery, filter, locale]);
+  }, [transactions, selectedAccount, deferredQuery, filter, locale, ownTransferCounterparts]);
   const visibleGroups = groups.slice(0, visibleGroupCount);
 
   useEffect(() => {
@@ -75,6 +95,8 @@ export function History() {
     setActiveAccount(accountId);
   };
 
+  if (selectedAccount === undefined) return null;
+
   const revealMore = () => {
     const firstNewIndex = visibleGroups.length;
     const nextVisibleCount = Math.min(groups.length, firstNewIndex + GROUPS_PER_PAGE);
@@ -92,7 +114,7 @@ export function History() {
       <div className="scrollbar-none -mx-4 overflow-x-auto px-4">
         <AccountStrip
           accounts={accounts}
-          value={activeAccount.id}
+          value={selectedAccount.id}
           onChange={selectAccount}
           label={t('history.accountPicker')}
           compact
@@ -147,11 +169,16 @@ export function History() {
                 className="kicker px-1"
                 tabIndex={-1}
               >
-                {fmtDay(rows[0].createdAt, locale)}
+                {fmtTransactionDay(rows[0], locale)}
               </h2>
               <div className="mt-1">
                 {rows.map((tx) => (
-                  <TxRow key={tx.id} tx={tx} currency={activeAccount.currency} />
+                  <TxRow
+                    key={tx.id}
+                    tx={tx}
+                    currency={selectedAccount.currency}
+                    ownTransferCounterparts={ownTransferCounterparts}
+                  />
                 ))}
               </div>
             </section>

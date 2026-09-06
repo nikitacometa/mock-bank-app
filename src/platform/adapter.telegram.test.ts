@@ -1,4 +1,44 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { canonicalBankStateJson } from '@/domain/bankState';
+import { appendRow } from '@/domain/ledger';
+import { buildSeed, CHECKING_ID } from '@/domain/seed';
+import type { BankState } from '@/domain/types';
+
+function currentServerTime(): string {
+  return new Date().toISOString();
+}
+
+async function digestState(state: BankState): Promise<string> {
+  const bytes = new TextEncoder().encode(canonicalBankStateJson(state));
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function stateFor(telegramId: string, primaryCurrency: BankState['primaryCurrency'] = 'KZT'): BankState {
+  return {
+    ...buildSeed(new Date().toISOString()),
+    primaryCurrency,
+    profile: { displayName: 'Ada Lovelace', telegramId },
+  };
+}
+
+function deferred<T>(): {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T) => void;
+  readonly reject: (reason?: unknown) => void;
+} {
+  let resolve: (value: T) => void = () => undefined;
+  let reject: (reason?: unknown) => void = () => undefined;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function digestBuffer(hex: string): ArrayBuffer {
+  return Uint8Array.from(hex.match(/.{2}/g) ?? [], (byte) => Number.parseInt(byte, 16)).buffer;
+}
 
 function available(implementation: (...args: never[]) => unknown = () => undefined) {
   return Object.assign(vi.fn(implementation), {
@@ -21,7 +61,7 @@ function sdkMock() {
         () => { id: number; first_name: string; last_name: string } | undefined
       >(() => ({ id: 9_007_199_254_740_991, first_name: 'Ada', last_name: 'Lovelace' })),
     },
-    retrieveRawInitData: vi.fn(() => 'signed-init-data'),
+    retrieveRawInitData: vi.fn<() => string | undefined>(() => 'signed-init-data'),
     themeParams: {
       isMounted: vi.fn(() => false),
       mount: available(),
@@ -284,6 +324,7 @@ describe('createTelegramAdapter', () => {
     const fetchMock = vi.fn(async () =>
       new Response(
         JSON.stringify({
+          serverTime: currentServerTime(),
           version: 1,
           revisionEpoch: '0123456789abcdef0123456789abcdef',
           revision: 1,
@@ -306,11 +347,32 @@ describe('createTelegramAdapter', () => {
 
     expect(adapter.getCurrentUser()).toEqual({ displayName: 'Никита', source: 'demo' });
     expect(sdk.initData.user).not.toHaveBeenCalled();
-    await expect(adapter.loadLaunchPreferences()).resolves.toMatchObject({
+    await expect(adapter.loadLaunchState()).resolves.toMatchObject({
       displayName: 'Server Verified',
       telegramId: '42',
     });
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('exposes only a stable opaque epoch for the observed raw Telegram session', async () => {
+    const { sdk, createTelegramAdapter } = await loadAdapter();
+    const adapter = createTelegramAdapter();
+
+    const first = adapter.getSessionFingerprint?.();
+    expect(first).toMatch(/^tma-session-\d+$/);
+    expect(adapter.getSessionFingerprint?.()).toBe(first);
+    expect(first).not.toContain('signed-init-data');
+
+    sdk.retrieveRawInitData.mockReturnValue('rotated-signed-init-data');
+    const rotated = adapter.getSessionFingerprint?.();
+    expect(rotated).toMatch(/^tma-session-\d+$/);
+    expect(rotated).not.toBe(first);
+    expect(rotated).not.toContain('rotated-signed-init-data');
+
+    sdk.retrieveRawInitData.mockReturnValue(undefined);
+    expect(adapter.getSessionFingerprint?.()).toBeUndefined();
+    sdk.retrieveRawInitData.mockReturnValue('signed-init-data');
+    expect(adapter.getSessionFingerprint?.()).not.toBe(first);
   });
 
   it('retries transient desired Main and Back control failures without duplicate listeners', async () => {
@@ -681,6 +743,7 @@ describe('createTelegramAdapter', () => {
     const fetchMock = vi.fn(async () =>
       new Response(
         JSON.stringify({
+          serverTime: currentServerTime(),
           version: 1,
           revisionEpoch: '0123456789abcdef0123456789abcdef',
           revision: 7,
@@ -696,7 +759,7 @@ describe('createTelegramAdapter', () => {
     const { createTelegramAdapter } = await loadAdapter();
     const adapter = createTelegramAdapter();
 
-    await expect(adapter.loadLaunchPreferences()).resolves.toEqual({
+    await expect(adapter.loadLaunchState()).resolves.toEqual({
       version: 1,
       revisionEpoch: '0123456789abcdef0123456789abcdef',
       revision: 7,
@@ -711,6 +774,565 @@ describe('createTelegramAdapter', () => {
     );
   });
 
+  it('authenticates a canonical server bootstrap and command with the same Telegram session', async () => {
+    const bootstrapState = stateFor('9007199254740993');
+    const commandState = { ...bootstrapState, primaryCurrency: 'USD' as const };
+    const [bootstrapDigest, commandDigest] = await Promise.all([
+      digestState(bootstrapState),
+      digestState(commandState),
+    ]);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            serverTime: currentServerTime(),
+            version: 1,
+            revisionEpoch: '0123456789abcdef0123456789abcdef',
+            revision: 1,
+            locale: 'en',
+            primaryCurrency: 'KZT',
+            displayName: 'Ada Lovelace',
+            telegramId: '9007199254740993',
+            bank: {
+              contractVersion: 1,
+              mode: 'server',
+              serverTime: currentServerTime(),
+              telegramId: '9007199254740993',
+              revisionEpoch: 'fedcba9876543210fedcba9876543210',
+              revision: 4,
+              digest: bootstrapDigest,
+              state: bootstrapState,
+              warnings: [],
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            serverTime: currentServerTime(),
+            version: 1,
+            contractVersion: 1,
+            mode: 'server',
+            telegramId: '9007199254740993',
+            revisionEpoch: 'fedcba9876543210fedcba9876543210',
+            revision: 5,
+            digest: commandDigest,
+            state: commandState,
+            warnings: [],
+            applied: true,
+            replayed: false,
+            operationRevision: 5,
+            outcome: { ok: true, applied: true },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const { createTelegramAdapter } = await loadAdapter();
+    const adapter = createTelegramAdapter();
+
+    await expect(adapter.loadLaunchState()).resolves.toMatchObject({
+      bank: { mode: 'server', revision: 4, state: bootstrapState },
+    });
+    await expect(
+      adapter.executeBankCommand(
+        { kind: 'set_primary_currency', currency: 'USD' },
+        '0123456789abcdef0123456789abcdef',
+      ),
+    ).resolves.toMatchObject({
+      revision: 5,
+      outcome: { ok: true, applied: true, state: commandState, warnings: [] },
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/tma/bank-command',
+      expect.objectContaining({
+        method: 'POST',
+        cache: 'no-store',
+        headers: expect.objectContaining({ Authorization: 'tma signed-init-data' }),
+        body: JSON.stringify({
+          version: 1,
+          clientMutationId: '0123456789abcdef0123456789abcdef',
+          command: { kind: 'set_primary_currency', currency: 'USD' },
+        }),
+      }),
+    );
+  });
+
+  it('accepts a canonical bootstrap row one second ahead of the captured device clock', async () => {
+    const clientNow = '2026-09-06T12:00:00.000Z';
+    const serverTime = '2026-09-06T12:00:01.000Z';
+    vi.useFakeTimers();
+    vi.setSystemTime(clientNow);
+    const base = {
+      ...buildSeed(serverTime),
+      profile: { displayName: 'Ada Lovelace', telegramId: '9007199254740993' },
+    };
+    const state = appendRow(base, {
+      accountId: CHECKING_ID,
+      amountMinor: 1,
+      kind: 'topup',
+      counterparty: 'Server clock boundary',
+      category: 'transfer',
+      createdAt: serverTime,
+    });
+    const digest = await digestState(state);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      version: 1,
+      revisionEpoch: '0123456789abcdef0123456789abcdef',
+      revision: 1,
+      locale: 'en',
+      primaryCurrency: 'KZT',
+      displayName: 'Ada Lovelace',
+      telegramId: '9007199254740993',
+      bank: {
+        contractVersion: 1,
+        mode: 'server',
+        serverTime,
+        telegramId: '9007199254740993',
+        revisionEpoch: 'fedcba9876543210fedcba9876543210',
+        revision: 1,
+        digest,
+        state,
+        warnings: [],
+      },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    const { createTelegramAdapter } = await loadAdapter();
+
+    await expect(createTelegramAdapter().loadLaunchState()).resolves.toMatchObject({
+      bank: { state },
+    });
+  });
+
+  it('refreshes server-owned rates and verifies the returned canonical digest', async () => {
+    const bootstrapState = stateFor('9007199254740993');
+    const ratesState: BankState = {
+      ...bootstrapState,
+      exchangeRates: {
+        ...bootstrapState.exchangeRates,
+        source: 'frankfurter',
+        asOf: new Date().toISOString().slice(0, 10),
+        fetchedAt: new Date().toISOString(),
+      },
+    };
+    const [bootstrapDigest, ratesDigest] = await Promise.all([
+      digestState(bootstrapState),
+      digestState(ratesState),
+    ]);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        serverTime: currentServerTime(),
+        version: 1,
+        revisionEpoch: '0123456789abcdef0123456789abcdef',
+        revision: 1,
+        locale: 'en',
+        primaryCurrency: 'KZT',
+        displayName: 'Ada Lovelace',
+        telegramId: '9007199254740993',
+        bank: {
+          contractVersion: 1,
+          mode: 'server',
+          serverTime: currentServerTime(),
+          telegramId: '9007199254740993',
+          revisionEpoch: 'fedcba9876543210fedcba9876543210',
+          revision: 4,
+          digest: bootstrapDigest,
+          state: bootstrapState,
+          warnings: [],
+        },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        serverTime: currentServerTime(),
+        version: 1,
+        contractVersion: 1,
+        mode: 'server',
+        telegramId: '9007199254740993',
+        revisionEpoch: 'fedcba9876543210fedcba9876543210',
+        revision: 5,
+        digest: ratesDigest,
+        state: ratesState,
+        warnings: [],
+        updated: true,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { createTelegramAdapter } = await loadAdapter();
+    const adapter = createTelegramAdapter();
+
+    await adapter.loadLaunchState();
+    await expect(
+      adapter.refreshBankRates('0123456789abcdef0123456789abcdef'),
+    ).resolves.toMatchObject({ updated: true, revision: 5, state: ratesState });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/tma/bank-rates',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ Authorization: 'tma signed-init-data' }),
+        body: JSON.stringify({
+          version: 1,
+          clientMutationId: '0123456789abcdef0123456789abcdef',
+        }),
+      }),
+    );
+  });
+
+  it('invalidates a rate refresh when Telegram identity changes during digest verification', async () => {
+    const state = stateFor('9007199254740993');
+    const digest = await digestState(state);
+    const responseBody = {
+      serverTime: currentServerTime(),
+      version: 1,
+      contractVersion: 1,
+      mode: 'server',
+      telegramId: '9007199254740993',
+      revisionEpoch: 'fedcba9876543210fedcba9876543210',
+      revision: 1,
+      digest,
+      state,
+      warnings: [],
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ...responseBody,
+        revisionEpoch: '0123456789abcdef0123456789abcdef',
+        locale: 'en',
+        primaryCurrency: 'KZT',
+        displayName: 'Ada Lovelace',
+        bank: responseBody,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ...responseBody,
+        updated: false,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { sdk, createTelegramAdapter } = await loadAdapter();
+    const adapter = createTelegramAdapter();
+    await adapter.loadLaunchState();
+    const digestGate = deferred<ArrayBuffer>();
+    const digestMock = vi.fn(() => digestGate.promise);
+    vi.stubGlobal('crypto', { subtle: { digest: digestMock } } as unknown as Crypto);
+
+    const refresh = adapter.refreshBankRates('0123456789abcdef0123456789abcdef');
+    await vi.waitFor(() => expect(digestMock).toHaveBeenCalledOnce());
+    sdk.retrieveRawInitData.mockReturnValue('different-signed-init-data');
+    digestGate.resolve(digestBuffer(digest));
+
+    await expect(refresh).rejects.toMatchObject({ code: 'telegram_session_changed' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('imports the local canonical snapshot only after an import-required bootstrap', async () => {
+    const localState = stateFor('9007199254740993', 'EUR');
+    const digest = await digestState(localState);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            serverTime: currentServerTime(),
+            version: 1,
+            revisionEpoch: '0123456789abcdef0123456789abcdef',
+            revision: 1,
+            locale: 'en',
+            primaryCurrency: 'EUR',
+            displayName: 'Ada Lovelace',
+            telegramId: '9007199254740993',
+            bank: {
+              contractVersion: 1,
+              mode: 'import_required',
+              telegramId: '9007199254740993',
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            serverTime: currentServerTime(),
+            version: 1,
+            contractVersion: 1,
+            mode: 'server',
+            imported: true,
+            telegramId: '9007199254740993',
+            revisionEpoch: 'fedcba9876543210fedcba9876543210',
+            revision: 1,
+            digest,
+            state: localState,
+            warnings: [],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const { createTelegramAdapter } = await loadAdapter();
+    const adapter = createTelegramAdapter();
+
+    await expect(adapter.loadLaunchState()).resolves.toMatchObject({
+      bank: { mode: 'import_required', telegramId: '9007199254740993' },
+    });
+    await expect(
+      adapter.importBankState({
+        version: 1,
+        importId: 'abcdef0123456789abcdef0123456789',
+        stateVersion: 5,
+        state: localState,
+      }),
+    ).resolves.toMatchObject({ imported: true, revision: 1, state: localState });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/tma/bank-import',
+      expect.objectContaining({
+        body: JSON.stringify({
+          version: 1,
+          importId: 'abcdef0123456789abcdef0123456789',
+          stateVersion: 5,
+          state: localState,
+        }),
+      }),
+    );
+  });
+
+  it('never sends a bank command after the Telegram raw session changes', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          serverTime: currentServerTime(),
+          version: 1,
+          revisionEpoch: '0123456789abcdef0123456789abcdef',
+          revision: 1,
+          locale: 'en',
+          primaryCurrency: 'KZT',
+          displayName: 'Ada Lovelace',
+          telegramId: '9007199254740993',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const { sdk, createTelegramAdapter } = await loadAdapter();
+    const adapter = createTelegramAdapter();
+
+    await adapter.loadLaunchState();
+    sdk.retrieveRawInitData.mockReturnValue('different-signed-init-data');
+
+    await expect(
+      adapter.executeBankCommand(
+        { kind: 'set_primary_currency', currency: 'USD' },
+        '0123456789abcdef0123456789abcdef',
+      ),
+    ).rejects.toMatchObject({ code: 'telegram_session_changed', retryable: true });
+    sdk.retrieveRawInitData.mockReturnValue('signed-init-data');
+    await expect(
+      adapter.executeBankCommand(
+        { kind: 'set_primary_currency', currency: 'USD' },
+        'abcdef0123456789abcdef0123456789',
+      ),
+    ).rejects.toMatchObject({ code: 'telegram_session_changed', retryable: true });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('rejects and invalidates a command response when the raw session changes during digest verification', async () => {
+    const bootstrapState = stateFor('9007199254740993');
+    const commandState = { ...bootstrapState, primaryCurrency: 'USD' as const };
+    const [bootstrapDigest, commandDigest] = await Promise.all([
+      digestState(bootstrapState),
+      digestState(commandState),
+    ]);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            serverTime: currentServerTime(),
+            version: 1,
+            revisionEpoch: '0123456789abcdef0123456789abcdef',
+            revision: 1,
+            locale: 'en',
+            primaryCurrency: 'KZT',
+            displayName: 'Ada Lovelace',
+            telegramId: '9007199254740993',
+            bank: {
+              contractVersion: 1,
+              mode: 'server',
+              serverTime: currentServerTime(),
+              telegramId: '9007199254740993',
+              revisionEpoch: 'fedcba9876543210fedcba9876543210',
+              revision: 1,
+              digest: bootstrapDigest,
+              state: bootstrapState,
+              warnings: [],
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            serverTime: currentServerTime(),
+            version: 1,
+            contractVersion: 1,
+            mode: 'server',
+            telegramId: '9007199254740993',
+            revisionEpoch: 'fedcba9876543210fedcba9876543210',
+            revision: 2,
+            digest: commandDigest,
+            state: commandState,
+            warnings: [],
+            applied: true,
+            replayed: false,
+            operationRevision: 2,
+            outcome: { ok: true, applied: true },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const { sdk, createTelegramAdapter } = await loadAdapter();
+    const adapter = createTelegramAdapter();
+    await adapter.loadLaunchState();
+    const digestGate = deferred<ArrayBuffer>();
+    const digestMock = vi.fn(() => digestGate.promise);
+    vi.stubGlobal('crypto', { subtle: { digest: digestMock } } as unknown as Crypto);
+
+    const command = adapter.executeBankCommand(
+      { kind: 'set_primary_currency', currency: 'USD' },
+      '0123456789abcdef0123456789abcdef',
+    );
+    await vi.waitFor(() => expect(digestMock).toHaveBeenCalledOnce());
+    sdk.retrieveRawInitData.mockReturnValue('different-signed-init-data');
+    digestGate.resolve(digestBuffer(commandDigest));
+
+    await expect(command).rejects.toMatchObject({ code: 'telegram_session_changed' });
+    sdk.retrieveRawInitData.mockReturnValue('signed-init-data');
+    await expect(
+      adapter.executeBankCommand(
+        { kind: 'set_primary_currency', currency: 'EUR' },
+        'abcdef0123456789abcdef0123456789',
+      ),
+    ).rejects.toMatchObject({ code: 'telegram_session_changed' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects and invalidates an import response when the raw session changes during digest verification', async () => {
+    const localState = stateFor('9007199254740993', 'EUR');
+    const digest = await digestState(localState);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            serverTime: currentServerTime(),
+            version: 1,
+            revisionEpoch: '0123456789abcdef0123456789abcdef',
+            revision: 1,
+            locale: 'en',
+            primaryCurrency: 'EUR',
+            displayName: 'Ada Lovelace',
+            telegramId: '9007199254740993',
+            bank: {
+              contractVersion: 1,
+              mode: 'import_required',
+              telegramId: '9007199254740993',
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            serverTime: currentServerTime(),
+            version: 1,
+            contractVersion: 1,
+            mode: 'server',
+            imported: true,
+            telegramId: '9007199254740993',
+            revisionEpoch: 'fedcba9876543210fedcba9876543210',
+            revision: 1,
+            digest,
+            state: localState,
+            warnings: [],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const { sdk, createTelegramAdapter } = await loadAdapter();
+    const adapter = createTelegramAdapter();
+    await adapter.loadLaunchState();
+    const digestGate = deferred<ArrayBuffer>();
+    const digestMock = vi.fn(() => digestGate.promise);
+    vi.stubGlobal('crypto', { subtle: { digest: digestMock } } as unknown as Crypto);
+
+    const imported = adapter.importBankState({
+      version: 1,
+      importId: 'abcdef0123456789abcdef0123456789',
+      stateVersion: 5,
+      state: localState,
+    });
+    await vi.waitFor(() => expect(digestMock).toHaveBeenCalledOnce());
+    sdk.retrieveRawInitData.mockReturnValue('different-signed-init-data');
+    digestGate.resolve(digestBuffer(digest));
+
+    await expect(imported).rejects.toMatchObject({ code: 'telegram_session_changed' });
+    sdk.retrieveRawInitData.mockReturnValue('signed-init-data');
+    await expect(
+      adapter.importBankState({
+        version: 1,
+        importId: '0123456789abcdef0123456789abcdef',
+        stateVersion: 5,
+        state: localState,
+      }),
+    ).rejects.toMatchObject({ code: 'telegram_session_changed' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects a canonical server snapshot whose digest does not match its state', async () => {
+    const state = stateFor('9007199254740993');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            serverTime: currentServerTime(),
+            version: 1,
+            revisionEpoch: '0123456789abcdef0123456789abcdef',
+            revision: 1,
+            locale: 'en',
+            primaryCurrency: 'KZT',
+            displayName: 'Ada Lovelace',
+            telegramId: '9007199254740993',
+            bank: {
+              contractVersion: 1,
+              mode: 'server',
+              serverTime: currentServerTime(),
+              telegramId: '9007199254740993',
+              revisionEpoch: 'fedcba9876543210fedcba9876543210',
+              revision: 1,
+              digest: '0'.repeat(64),
+              state,
+              warnings: [],
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    );
+    const { createTelegramAdapter } = await loadAdapter();
+    const adapter = createTelegramAdapter();
+
+    await expect(adapter.loadLaunchState()).rejects.toMatchObject({ retryable: false });
+  });
+
   it('marks only transient preference HTTP failures as retryable', async () => {
     const fetchMock = vi
       .fn()
@@ -721,9 +1343,9 @@ describe('createTelegramAdapter', () => {
     const { createTelegramAdapter } = await loadAdapter();
     const adapter = createTelegramAdapter();
 
-    await expect(adapter.loadLaunchPreferences()).rejects.toMatchObject({ retryable: true });
-    await expect(adapter.loadLaunchPreferences()).rejects.toMatchObject({ retryable: true });
-    await expect(adapter.loadLaunchPreferences()).rejects.toMatchObject({ retryable: false });
+    await expect(adapter.loadLaunchState()).rejects.toMatchObject({ retryable: true });
+    await expect(adapter.loadLaunchState()).rejects.toMatchObject({ retryable: true });
+    await expect(adapter.loadLaunchState()).rejects.toMatchObject({ retryable: false });
   });
 
   it('marks a malformed successful preference response as non-retryable', async () => {
@@ -739,7 +1361,7 @@ describe('createTelegramAdapter', () => {
     const { createTelegramAdapter } = await loadAdapter();
     const adapter = createTelegramAdapter();
 
-    await expect(adapter.loadLaunchPreferences()).rejects.toMatchObject({ retryable: false });
+    await expect(adapter.loadLaunchState()).rejects.toMatchObject({ retryable: false });
   });
 
   it('normalizes safe host names and falls back for unsafe Telegram identity data', async () => {

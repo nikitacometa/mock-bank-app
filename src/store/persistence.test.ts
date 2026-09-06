@@ -69,12 +69,33 @@ describe('loadPersisted', () => {
     expect(loadRaw(storedEnvelope(buildSeed(NOW), 3))).toEqual({ kind: 'corrupted' });
   });
 
-  it('accepts the bundled fallback snapshot when the device clock predates its build date', () => {
+  it('migrates schema v4 in place without reseeding the owner ledger', () => {
+    const legacy = mutableState();
+    delete legacy.demoBaseCurrency;
+    delete legacy.fixtureId;
+    delete legacy.recurringRules;
+    for (const account of records(legacy, 'accounts')) {
+      delete account.role;
+      delete account.status;
+    }
+    const legacyTransactions = legacy.transactions;
+
+    const result = loadRaw(storedEnvelope(legacy, 4));
+
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.state.transactions).toEqual(legacyTransactions);
+    expect(result.state.demoBaseCurrency).toBe('KZT');
+    expect(result.state.fixtureId).toBe('owner-kzt-v1');
+    expect(result.state.recurringRules).toEqual([]);
+  });
+
+  it('rejects persisted fixture metadata that is ahead of the device clock', () => {
     vi.useFakeTimers();
     vi.setSystemTime('2026-08-20T12:00:00.000Z');
     const state = buildSeed('2026-08-20T12:00:00.000Z');
 
-    expect(loadRaw(storedEnvelope(state))).toEqual({ kind: 'ok', state });
+    expect(loadRaw(storedEnvelope(state))).toEqual({ kind: 'corrupted' });
   });
 
   it('strips extra persisted store keys from the loaded BankState projection', () => {
@@ -88,6 +109,8 @@ describe('loadPersisted', () => {
     if (result.kind !== 'ok') throw new Error('valid persisted state was rejected');
     expect(Object.keys(result.state)).toEqual([
       'primaryCurrency',
+      'demoBaseCurrency',
+      'fixtureId',
       'exchangeRates',
       'accounts',
       'transactions',
@@ -96,10 +119,24 @@ describe('loadPersisted', () => {
       'profile',
       'nextSeq',
       'recentTransferIds',
+      'recurringRules',
     ]);
     expect(result.state).toEqual(buildSeed(NOW));
     expect('settleNow' in result.state).toBe(false);
     expect('ratesStatus' in result.state).toBe(false);
+  });
+
+  it('strips unknown nested fields from the loaded BankState projection', () => {
+    const state = mutableState();
+    records(state, 'accounts')[0].injected = 'account payload';
+    records(state, 'transactions')[0].injected = 'transaction payload';
+    (state.exchangeRates as MutableRecord).injected = 'rate payload';
+
+    const result = loadRaw(storedEnvelope(state));
+
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') throw new Error('valid persisted state was rejected');
+    expect(result.state).toEqual(buildSeed(NOW));
   });
 
   it('keeps an unavailable or empty storage in in-memory mode', () => {
@@ -317,7 +354,7 @@ describe('loadPersisted', () => {
     expect(loadRaw(storedEnvelope(sameDate))).toEqual({ kind: 'ok', state: sameDate });
   });
 
-  it('rejects backdated savings metadata when imminent settlement exceeds safe money', () => {
+  it('rejects savings metadata that can overflow or suppress settlement', () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
 
@@ -338,7 +375,7 @@ describe('loadPersisted', () => {
     if (!futureSavings) throw new Error('seed has no savings account');
     futureSavings.accrualAnchor = '2026-09-02T00:00:00.000Z';
 
-    expect(loadRaw(storedEnvelope(futureClock))).toEqual({ kind: 'ok', state: futureClock });
+    expect(loadRaw(storedEnvelope(futureClock))).toEqual({ kind: 'corrupted' });
   });
 
   it('requires savings APY and accrual anchor as one complete pair', () => {
@@ -393,7 +430,7 @@ describe('loadPersisted', () => {
     }
   });
 
-  it('preserves a future-clock live snapshot until the store refreshes it', () => {
+  it('rejects a future-clock live snapshot at the persisted trust boundary', () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
     const tooFarAhead = mutableState();
@@ -401,12 +438,12 @@ describe('loadPersisted', () => {
     tooFarAheadRates.source = 'frankfurter';
     tooFarAheadRates.fetchedAt = '2026-09-01T12:05:01.000Z';
 
-    expect(loadRaw(storedEnvelope(tooFarAhead))).toEqual({ kind: 'ok', state: tooFarAhead });
+    expect(loadRaw(storedEnvelope(tooFarAhead))).toEqual({ kind: 'corrupted' });
 
     const boundary = mutableState();
     const boundaryRates = boundary.exchangeRates as MutableRecord;
     boundaryRates.source = 'frankfurter';
-    boundaryRates.fetchedAt = '2026-09-01T12:05:00.000Z';
+    boundaryRates.fetchedAt = NOW;
     expect(loadRaw(storedEnvelope(boundary))).toEqual({ kind: 'ok', state: boundary });
   });
 

@@ -275,7 +275,7 @@ const MERCHANT_MARKS: readonly MerchantMark[] = [
     id: 'apple-store',
     tone: 'ink',
     matches: (name, compact) =>
-      includesAny(name, ['apple store', 'apple com bill']) || includesAny(compact, ['applecombill', 'itunescom']),
+      name === 'apple' || includesAny(name, ['apple store', 'apple com bill']) || includesAny(compact, ['applecombill', 'itunescom']),
     glyph: AppleStoreMark,
   },
   {

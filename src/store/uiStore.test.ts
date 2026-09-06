@@ -1,6 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CHECKING_ID } from '@/domain/seed';
-import { useUiStore } from './uiStore';
+import { buildSeed, CHECKING_ID } from '@/domain/seed';
+import type { BankState } from '@/domain/types';
+import { reconcileUiAfterBankStateChange, useUiStore } from './uiStore';
+
+const RECONCILE_NOW = '2026-09-05T12:00:00.000Z';
+
+function closeAccountForUi(state: BankState, accountId: string): BankState {
+  return {
+    ...state,
+    accounts: state.accounts.map((account) =>
+      account.id === accountId
+        ? { ...account, status: 'closed' as const, closedAt: RECONCILE_NOW }
+        : account,
+    ),
+    cards: state.cards.map((card) =>
+      card.accountId === accountId
+        ? {
+            ...card,
+            status: 'frozen' as const,
+            freezeReason: 'account_closed' as const,
+          }
+        : card,
+    ),
+  };
+}
 
 beforeEach(() => {
   useUiStore.setState({
@@ -156,14 +179,130 @@ describe('useUiStore locale', () => {
 
 describe('useUiStore navigation', () => {
   it('opens the global transfer on Home before the balance can change', () => {
+    const state = buildSeed(RECONCILE_NOW);
     useUiStore.setState({ screen: 'history', sheet: null });
 
-    useUiStore.getState().openGlobalTransfer();
+    useUiStore.getState().openGlobalTransfer(state.accounts);
 
     expect(useUiStore.getState()).toMatchObject({
       screen: 'home',
       sheet: { kind: 'transferContact' },
     });
+  });
+
+  it('does not resurrect a closed History selection after visiting Home', () => {
+    const previous = buildSeed(RECONCILE_NOW);
+    const selected = previous.accounts.find((account) => account.role === 'companion-1');
+    if (selected === undefined) throw new Error('Seed fixture has no companion account');
+    const closed = closeAccountForUi(previous, selected.id);
+    useUiStore.setState({
+      screen: 'history',
+      activeAccountId: selected.id,
+      sheet: null,
+    });
+    reconcileUiAfterBankStateChange(previous, closed);
+
+    useUiStore.getState().navigateToActiveScreen('home', closed.accounts);
+    useUiStore.getState().setScreen('history');
+
+    expect(useUiStore.getState()).toMatchObject({
+      screen: 'history',
+      activeAccountId: CHECKING_ID,
+      sheet: null,
+    });
+  });
+
+  it('normalizes a closed History selection before opening the global transfer', () => {
+    const previous = buildSeed(RECONCILE_NOW);
+    const selected = previous.accounts.find((account) => account.role === 'companion-1');
+    if (selected === undefined) throw new Error('Seed fixture has no companion account');
+    const closed = closeAccountForUi(previous, selected.id);
+    useUiStore.setState({
+      screen: 'history',
+      activeAccountId: selected.id,
+      sheet: null,
+    });
+    reconcileUiAfterBankStateChange(previous, closed);
+
+    useUiStore.getState().openGlobalTransfer(closed.accounts);
+
+    expect(useUiStore.getState()).toMatchObject({
+      screen: 'home',
+      activeAccountId: CHECKING_ID,
+      sheet: { kind: 'transferContact' },
+    });
+  });
+});
+
+describe('reconcileUiAfterBankStateChange', () => {
+  it('preserves a valid closed-account selection on History', () => {
+    const previous = buildSeed(RECONCILE_NOW);
+    const selected = previous.accounts.find((account) => account.role === 'companion-1');
+    if (selected === undefined) throw new Error('Seed fixture has no companion account');
+    useUiStore.setState({
+      screen: 'history',
+      activeAccountId: selected.id,
+      sheet: null,
+    });
+
+    reconcileUiAfterBankStateChange(previous, closeAccountForUi(previous, selected.id));
+
+    expect(useUiStore.getState()).toMatchObject({
+      screen: 'history',
+      activeAccountId: selected.id,
+      sheet: null,
+    });
+  });
+
+  it('moves active-only screens away from a closed account and closes its details', () => {
+    const previous = buildSeed(RECONCILE_NOW);
+    const selected = previous.accounts.find((account) => account.role === 'companion-1');
+    if (selected === undefined) throw new Error('Seed fixture has no companion account');
+    useUiStore.setState({
+      screen: 'home',
+      activeAccountId: selected.id,
+      sheet: { kind: 'accountDetail', accountId: selected.id },
+    });
+
+    reconcileUiAfterBankStateChange(previous, closeAccountForUi(previous, selected.id));
+
+    expect(useUiStore.getState().activeAccountId).toBe(CHECKING_ID);
+    expect(useUiStore.getState().sheet).toBeNull();
+  });
+
+  it('keeps a transfer draft for transaction-only adoption but closes it on account topology change', () => {
+    const previous = buildSeed(RECONCILE_NOW);
+    useUiStore.setState({ sheet: { kind: 'transferOwn' } });
+    const transactionOnly = {
+      ...previous,
+      transactions: previous.transactions.map((transaction) => ({ ...transaction })),
+    };
+
+    reconcileUiAfterBankStateChange(previous, transactionOnly);
+    expect(useUiStore.getState().sheet).toEqual({ kind: 'transferOwn' });
+
+    const selected = previous.accounts.find((account) => account.role === 'companion-1');
+    if (selected === undefined) throw new Error('Seed fixture has no companion account');
+    reconcileUiAfterBankStateChange(transactionOnly, closeAccountForUi(previous, selected.id));
+    expect(useUiStore.getState().sheet).toBeNull();
+  });
+
+  it('closes stale contact and card sheets after their canonical targets disappear', () => {
+    const previous = buildSeed(RECONCILE_NOW);
+    useUiStore.setState({ sheet: { kind: 'transferContact' } });
+    const withoutContact = { ...previous, contacts: previous.contacts.slice(1) };
+
+    reconcileUiAfterBankStateChange(previous, withoutContact);
+    expect(useUiStore.getState().sheet).toBeNull();
+
+    const card = previous.cards[0];
+    if (card === undefined) throw new Error('Seed fixture has no card');
+    useUiStore.setState({ sheet: { kind: 'cardDetail', cardId: card.id } });
+    reconcileUiAfterBankStateChange(previous, {
+      ...previous,
+      cards: previous.cards.filter((candidate) => candidate.id !== card.id),
+    });
+    expect(useUiStore.getState().sheet).toBeNull();
   });
 });
 

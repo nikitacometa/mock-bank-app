@@ -1,4 +1,5 @@
 import { useUiStore, type Screen } from '@/store/uiStore';
+import { useBankStore } from '@/store/bankStore';
 import { usePlatform } from '@/platform/usePlatform';
 import { useI18n, type TranslationKey } from '@/i18n';
 import { IconCards, IconHistory, IconHome, IconTransfer } from './icons';
@@ -9,8 +10,10 @@ const TABS: Array<{ screen: Screen; labelKey: TranslationKey; Icon: typeof IconH
 ];
 
 export function TabBar() {
+  const accounts = useBankStore((s) => s.accounts);
   const screen = useUiStore((s) => s.screen);
   const setScreen = useUiStore((s) => s.setScreen);
+  const navigateToActiveScreen = useUiStore((s) => s.navigateToActiveScreen);
   const openGlobalTransfer = useUiStore((s) => s.openGlobalTransfer);
   const platform = usePlatform();
   const { t } = useI18n();
@@ -21,7 +24,10 @@ export function TabBar() {
       className={`flex flex-1 flex-col items-center gap-1 py-2 transition-colors ${
         screen === entry.screen ? 'text-ink' : 'text-ink-3'
       }`}
-      onClick={() => setScreen(entry.screen)}
+      onClick={() => {
+        if (entry.screen === 'history') setScreen('history');
+        else navigateToActiveScreen(entry.screen, accounts);
+      }}
       aria-current={screen === entry.screen ? 'page' : undefined}
     >
       <entry.Icon size={22} />
@@ -43,7 +49,7 @@ export function TabBar() {
             className="-mt-5 flex size-14 items-center justify-center rounded-full bg-ivory text-bg shadow-lg shadow-bg/35 transition-transform active:scale-95"
             onClick={() => {
               platform.haptic('light');
-              openGlobalTransfer();
+              openGlobalTransfer(accounts);
             }}
           >
             <IconTransfer size={24} />
@@ -53,7 +59,7 @@ export function TabBar() {
           className={`flex flex-1 flex-col items-center gap-1 py-2 transition-colors ${
             screen === 'cards' ? 'text-ink' : 'text-ink-3'
           }`}
-          onClick={() => setScreen('cards')}
+          onClick={() => navigateToActiveScreen('cards', accounts)}
           aria-current={screen === 'cards' ? 'page' : undefined}
         >
           <IconCards size={22} />

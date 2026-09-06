@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { PlatformProvider } from '@/platform/usePlatform';
+import { PlatformProvider, usePlatform } from '@/platform/usePlatform';
 import { useBankStore } from '@/store/bankStore';
 import { useUiStore } from '@/store/uiStore';
 import { ErrorBoundary } from './ErrorBoundary';
@@ -14,6 +14,16 @@ import { AccountDetailSheet } from '@/ui/screens/sheets/AccountDetailSheet';
 import { SettingsSheet } from '@/ui/screens/sheets/SettingsSheet';
 import { useI18n } from '@/i18n';
 import { BootstrapGate } from './BootstrapGate';
+import {
+  synchronizeLaunchPreferences,
+  type LaunchPreferenceSyncResult,
+} from './launchPreferences';
+
+export function shouldSettleAfterTelegramForegroundSync(
+  result: LaunchPreferenceSyncResult,
+): boolean {
+  return result === 'current' || result === 'applied';
+}
 
 function ActiveSheet() {
   const sheet = useUiStore((s) => s.sheet);
@@ -33,6 +43,7 @@ function ActiveSheet() {
 }
 
 function Shell() {
+  const platform = usePlatform();
   const settleNow = useBankStore((s) => s.settleNow);
   const refreshRates = useBankStore((s) => s.refreshRates);
   const recovered = useBankStore((s) => s.recoveredFromCorruption);
@@ -60,19 +71,44 @@ function Shell() {
   }, [recovered, showToast]);
 
   useEffect(() => {
+    let foregroundController: AbortController | null = null;
+    const synchronizeForeground = () => {
+      if (!platform.isTelegram) {
+        void settleNow();
+        return;
+      }
+      foregroundController?.abort();
+      const controller = new AbortController();
+      foregroundController = controller;
+      void synchronizeLaunchPreferences(platform, controller.signal)
+        .then((result) => {
+          if (
+            !controller.signal.aborted &&
+            shouldSettleAfterTelegramForegroundSync(result)
+          ) {
+            void settleNow();
+          }
+        })
+        .catch((error: unknown) => {
+          if (controller.signal.aborted) return;
+          const message = error instanceof Error ? error.message : 'unknown sync error';
+          console.warn(`[telegram] foreground bank sync failed: ${message}`);
+        });
+    };
     const onVisible = () => {
-      if (document.visibilityState === 'visible') void settleNow();
+      if (document.visibilityState === 'visible') synchronizeForeground();
     };
     const onPageShow = (event: PageTransitionEvent) => {
-      if (event.persisted) void settleNow();
+      if (event.persisted) synchronizeForeground();
     };
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('pageshow', onPageShow);
     return () => {
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('pageshow', onPageShow);
+      foregroundController?.abort();
     };
-  }, [settleNow]);
+  }, [platform, settleNow]);
 
   return (
     <div className="app-shell mx-auto max-w-[430px]" style={{ minHeight: 'var(--app-height)' }}>

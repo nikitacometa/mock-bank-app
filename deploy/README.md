@@ -177,8 +177,9 @@ the bot under the `cometa-bank-bot` alias. Bot API egress uses a separate
 Compose-owned bridge. See `bot/README.md` for the single interactive activation
 command, immutable image prebuild, verification, rotation, and rollback.
 
-The production vhost declares its own bootstrap rate/connection zones at the
-top of `nginx/euphoria.bot.conf`, which is included from Nginx's `http` context.
+The production vhost declares its own TMA API rate/connection zones at the top
+of `nginx/euphoria.bot.conf`, which is included from Nginx's `http` context.
 Do not copy those `limit_*_zone` directives into a `server` or `location`
-block. The endpoint keeps dynamic Docker DNS resolution, so a stopped or
+block. The bootstrap, bank-import, and bank-command endpoints keep dynamic
+Docker DNS resolution, so a stopped or
 recreated bot cannot make `nginx -t` depend on the container's current IP.

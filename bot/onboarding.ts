@@ -1,4 +1,6 @@
 import { TelegramApiError } from './bot-api.js';
+import { BankChatFlow } from './bank-flow.js';
+import type { BankAuthorityService } from './bank-service.js';
 import { escapeHtml, normalizeDisplayName, telegramDisplayName } from './html.js';
 import {
   BOT_CURRENCIES,
@@ -11,6 +13,12 @@ import {
   type TelegramUserIdentity,
 } from './model.js';
 import { PreferencesRepository, type PendingReply } from './repository.js';
+import {
+  InMemoryBankRequestLimiter,
+  type BankRequestLimiter,
+} from './rate-limit.js';
+import type { BankCommand } from '../src/domain/bankCommands.js';
+import type { BankState } from '../src/domain/types.js';
 import type {
   BotTransport,
   InlineKeyboardButton,
@@ -209,14 +217,14 @@ function parseCallback(data: string | undefined): CallbackAction | null {
 
 function commandOf(
   text: string | undefined,
-): 'start' | 'settings' | 'help' | 'privacy' | null {
+): 'start' | 'settings' | 'help' | 'privacy' | 'add' | 'accounts' | 'recurring' | 'cancel' | null {
   if (text === undefined) return null;
-  const match = /^\/(start|settings|help|privacy)(?:@[A-Za-z0-9_]+)?(?:\s|$)/.exec(text);
-  return match?.[1] === 'start' ||
-    match?.[1] === 'settings' ||
-    match?.[1] === 'help' ||
-    match?.[1] === 'privacy'
-    ? match[1]
+  const match = /^\/(start|settings|help|privacy|add|accounts|recurring|cancel)(?:@[A-Za-z0-9_]+)?(?:\s|$)/.exec(text);
+  const command = match?.[1];
+  return command === 'start' || command === 'settings' || command === 'help' ||
+    command === 'privacy' || command === 'add' || command === 'accounts' ||
+    command === 'recurring' || command === 'cancel'
+    ? command
     : null;
 }
 
@@ -267,16 +275,26 @@ function settingsText(locale: BotLocale): string {
     : '<b>Cometa settings</b>\nChange the interface language, primary currency, or name shown in the app.';
 }
 
-function helpText(locale: BotLocale): string {
+function helpText(locale: BotLocale, serverLedgerEnabled: boolean): string {
+  const bankCommands = serverLedgerEnabled
+    ? locale === 'ru'
+      ? '\n/add — записать расход или поступление\n/accounts — управлять счетами\n/recurring — ежемесячные операции'
+      : '\n/add — record an expense or income\n/accounts — manage accounts\n/recurring — monthly entries'
+    : '';
+  const cancelCommand = serverLedgerEnabled
+    ? locale === 'ru'
+      ? '\n/cancel — отменить текущий шаг'
+      : '\n/cancel — cancel the current step'
+    : '';
   return locale === 'ru'
-    ? '<b>Как работает Cometa</b>\n/start — открыть демо-банк\n/settings — язык, валюта и имя\n/help — эта подсказка\n/privacy — какие данные хранит Cometa\n\nКурсы справочные. Реальные деньги и платежи не используются.'
-    : '<b>How Cometa works</b>\n/start — open the demo bank\n/settings — language, currency, and name\n/help — show this guide\n/privacy — what Cometa stores\n\nRates are for reference. No real money or payments are involved.';
+    ? `<b>Как работает Cometa</b>\n/start — dashboard демо-банка${bankCommands}\n/settings — язык, валюта и имя${cancelCommand}\n/help — эта справка\n/privacy — какие данные хранит Cometa\n\nКурсы справочные. Реальные деньги и платежи не используются.`
+    : `<b>How Cometa works</b>\n/start — demo bank dashboard${bankCommands}\n/settings — language, currency, and name${cancelCommand}\n/help — this guide\n/privacy — what Cometa stores\n\nRates are for reference. No real money or payments are involved.`;
 }
 
 function privacyText(locale: BotLocale): string {
   return locale === 'ru'
-    ? '<b>Конфиденциальность Cometa</b>\nСервер хранит ID пользователя и приватного чата Telegram, язык интерфейса, основную валюту, необязательное имя, этап онбординга, revision настроек и revision epoch. Также хранятся ID обработанных updates и pending reply — до его доставки или окончательного отклонения.\n\nМок-балансы, счета, карты и журнал операций остаются на вашем устройстве. Cometa не проводит реальные платежи и не работает с реальными деньгами.'
-    : '<b>Cometa privacy</b>\nThe server stores your Telegram user and private chat IDs, interface language, primary currency, optional display name, onboarding stage, preference revision, and revision epoch. It also keeps processed update IDs and a pending reply until it is delivered or permanently rejected.\n\nMock balances, accounts, cards, and the transaction ledger stay on your device. Cometa does not process real payments or real money.';
+    ? '<b>Конфиденциальность Cometa</b>\nВ Telegram-режиме сервер хранит отдельно для вашего Telegram ID вымышленные счета, журнал операций, правила повторений, черновик текущего шага, язык и профиль. Технически также хранятся ID обработанных updates и недоставленные ответы.\n\nОбычная web-демка без Telegram остаётся только на устройстве. Cometa не проводит реальные платежи и не работает с реальными деньгами. Экспорт и удаление данных пока не автоматизированы.'
+    : '<b>Cometa privacy</b>\nIn Telegram mode, the server stores fictional accounts, ledger entries, recurring rules, the current flow draft, language, and profile separately for your Telegram ID. It also keeps processed update IDs and undelivered replies for reliability.\n\nThe regular web demo outside Telegram remains device-local. Cometa does not process real payments or real money. Automated export and deletion are not available yet.';
 }
 
 function customNamePrompt(locale: BotLocale): string {
@@ -298,6 +316,7 @@ export class OnboardingEngine {
   readonly #logger: BotLogger;
   readonly #menuSleep: MenuSleep;
   readonly #clock: Clock;
+  readonly #bankFlow?: BankChatFlow;
   readonly #pendingReplyRetries = new Map<
     number,
     { readonly attempts: number; readonly nextAttemptAt: number }
@@ -310,6 +329,8 @@ export class OnboardingEngine {
     logger: BotLogger = silentLogger,
     menuSleep: MenuSleep = menuDelay,
     clock: Clock = Date.now,
+    bankService?: BankAuthorityService<BankState, BankCommand>,
+    bankRequestLimiter: BankRequestLimiter = new InMemoryBankRequestLimiter(),
   ) {
     this.#repository = repository;
     this.#transport = transport;
@@ -317,9 +338,30 @@ export class OnboardingEngine {
     this.#logger = logger;
     this.#menuSleep = menuSleep;
     this.#clock = clock;
+    this.#bankFlow = bankService === undefined
+      ? undefined
+      : new BankChatFlow(
+          repository,
+          transport,
+          webAppUrl,
+          bankService,
+          bankRequestLimiter,
+          logger,
+          () => new Date(clock()),
+        );
   }
 
   async handleUpdate(update: TelegramUpdate, signal?: AbortSignal): Promise<void> {
+    const privateUserId = update.message?.chat.type === 'private'
+      ? update.message.from?.id
+      : update.callbackQuery?.message?.chat.type === 'private'
+        ? update.callbackQuery.from.id
+        : undefined;
+    if (
+      privateUserId !== undefined &&
+      await this.#serverBankFlow()?.resumeConversationReply(update.updateId, privateUserId, signal)
+    ) return;
+    if (this.#repository.hasProcessedUpdate(update.updateId)) return;
     const pending = this.#repository.getPendingReply(update.updateId);
     if (pending !== null) {
       await this.#attemptPendingReply(pending, signal);
@@ -329,7 +371,7 @@ export class OnboardingEngine {
       await this.#handleMessage(update.message, update.updateId, signal);
     }
     if (update.callbackQuery !== undefined) {
-      await this.#handleCallback(update.callbackQuery, signal);
+      await this.#handleCallback(update.callbackQuery, update.updateId, signal);
     }
   }
 
@@ -339,6 +381,8 @@ export class OnboardingEngine {
       signal?.throwIfAborted();
       await this.#attemptPendingReply(pending, signal);
     }
+    await this.#serverBankFlow()?.flushConversationReplies(signal);
+    await this.#serverBankFlow()?.flushBankOutbox(signal);
   }
 
   async #handleMessage(
@@ -358,9 +402,30 @@ export class OnboardingEngine {
     const shouldSyncMenu = ensured.created || command === 'start';
 
     if (command === 'start') {
-      await this.#sendStart(message.chat.id, ensured.user, signal);
+      this.#serverBankFlow()?.reset(message.from.id);
+      const user = ensured.user.stage === 'custom_name'
+        ? this.#repository.updateUser(message.from.id, { stage: 'complete' })
+        : ensured.user;
+      await this.#sendStart(message.chat.id, user, updateId, signal);
       if (shouldSyncMenu) {
-        await this.#syncMenuButton(message.from.id, ensured.user.locale, signal);
+        await this.#syncMenuButton(message.from.id, user.locale, signal);
+      }
+      return;
+    }
+    if (
+      command === 'add' ||
+      command === 'accounts' ||
+      command === 'recurring' ||
+      command === 'cancel'
+    ) {
+      const user = command === 'cancel' && ensured.user.stage === 'custom_name'
+        ? this.#repository.updateUser(message.from.id, { stage: 'complete' })
+        : ensured.user;
+      const bankFlow = this.#serverBankFlow();
+      if (user.stage !== 'complete' || bankFlow === undefined) {
+        await this.#sendStart(message.chat.id, user, updateId, signal);
+      } else {
+        await bankFlow.handleCommand(command, message, user, updateId, signal);
       }
       return;
     }
@@ -379,7 +444,7 @@ export class OnboardingEngine {
     if (command === 'help') {
       await this.#send(
         message.chat.id,
-        helpText(ensured.user.locale),
+        helpText(ensured.user.locale, this.#repository.ledgerMode() === 'server'),
         { inline_keyboard: [[webAppButton(launchLabel(ensured.user.locale), this.#webAppUrl)]] },
         signal,
       );
@@ -406,6 +471,18 @@ export class OnboardingEngine {
         await this.#send(message.chat.id, invalidNameText(ensured.user.locale), undefined, signal);
         return;
       }
+      const canonicalResult = await this.#serverBankFlow()?.applyCanonicalPreference(
+        ensured.user,
+        message.chat.id,
+        updateId,
+        { kind: 'set_display_name', displayName },
+        signal,
+      ) ?? 'unavailable';
+      if (canonicalResult === 'applied') {
+        this.#repository.updateUser(message.from.id, { stage: 'complete' });
+        return;
+      }
+      if (canonicalResult === 'rejected') return;
       this.#repository.applyCustomNameIntent(
         message.from.id,
         message.chat.id,
@@ -417,6 +494,14 @@ export class OnboardingEngine {
       await this.#attemptPendingReply(pending, signal);
       return;
     }
+    if (ensured.user.stage === 'complete' && await this.#serverBankFlow()?.handleMessage(
+      message,
+      ensured.user,
+      updateId,
+      signal,
+    )) {
+      return;
+    }
     if (shouldSyncMenu) {
       await this.#syncMenuButton(message.from.id, ensured.user.locale, signal);
     }
@@ -424,6 +509,7 @@ export class OnboardingEngine {
 
   async #handleCallback(
     callback: TelegramCallbackQuery,
+    updateId: number,
     signal?: AbortSignal,
   ): Promise<void> {
     if (callback.message?.chat.type !== 'private') return;
@@ -434,6 +520,7 @@ export class OnboardingEngine {
       primaryCurrency: 'KZT',
       displayName: defaultName(callback.from, initialLocale),
     });
+    if (await this.#serverBankFlow()?.handleCallback(callback, updateId, ensured.user, signal)) return;
     const action = parseCallback(callback.data);
     await this.#answerCallback(
       callback.id,
@@ -463,12 +550,7 @@ export class OnboardingEngine {
         if (isChangingName) {
           await this.#send(chatId, customNamePrompt(updated.locale), undefined, signal);
         } else if (alreadyComplete) {
-          await this.#send(
-            chatId,
-            summaryText(updated),
-            summaryKeyboard(updated.locale, this.#webAppUrl),
-            signal,
-          );
+          await this.#sendReady(chatId, updated, updateId, signal);
         } else {
           await this.#send(chatId, currencyText(updated.locale), currencyKeyboard(), signal);
         }
@@ -484,17 +566,31 @@ export class OnboardingEngine {
         if (isChangingName) {
           await this.#send(chatId, customNamePrompt(updated.locale), undefined, signal);
         } else {
-          await this.#send(
-            chatId,
-            summaryText(updated),
-            summaryKeyboard(updated.locale, this.#webAppUrl),
-            signal,
-          );
+          await this.#sendReady(chatId, updated, updateId, signal);
         }
         break;
       }
       case 'currency': {
         const isChangingName = ensured.user.stage === 'custom_name';
+        const canonicalResult = await this.#serverBankFlow()?.applyCanonicalPreference(
+          ensured.user,
+          chatId,
+          updateId,
+          { kind: 'set_primary_currency', currency: action.currency },
+          signal,
+        ) ?? 'unavailable';
+        if (canonicalResult === 'applied') {
+          if (isChangingName) {
+            await this.#send(chatId, customNamePrompt(ensured.user.locale), undefined, signal);
+          } else {
+            const updated = ensured.user.stage === 'complete'
+              ? ensured.user
+              : this.#repository.updateUser(callback.from.id, { stage: 'complete' });
+            await this.#sendReady(chatId, updated, updateId, signal);
+          }
+          break;
+        }
+        if (canonicalResult === 'rejected') break;
         const updated = this.#repository.applyPreferenceIntent(callback.from.id, {
           primaryCurrency: action.currency,
           stage: isChangingName ? 'custom_name' : 'complete',
@@ -517,8 +613,21 @@ export class OnboardingEngine {
         break;
       }
       case 'telegramName': {
+        const displayName = defaultName(callback.from, ensured.user.locale);
+        const canonicalResult = await this.#serverBankFlow()?.applyCanonicalPreference(
+          ensured.user,
+          chatId,
+          updateId,
+          { kind: 'set_display_name', displayName },
+          signal,
+        ) ?? 'unavailable';
+        if (canonicalResult === 'applied') {
+          this.#repository.updateUser(callback.from.id, { stage: 'complete' });
+          break;
+        }
+        if (canonicalResult === 'rejected') break;
         const updated = this.#repository.applyPreferenceIntent(callback.from.id, {
-          displayName: defaultName(callback.from, ensured.user.locale),
+          displayName,
           stage: 'complete',
         });
         await this.#send(
@@ -530,12 +639,14 @@ export class OnboardingEngine {
         break;
       }
       case 'settingsLanguage': {
+        const canonicalCurrency = this.#serverBankFlow()
+          ?.canonicalPreferences(callback.from.id)?.primaryCurrency;
         await this.#send(
           chatId,
           settingsLanguageText(ensured.user.locale),
           settingsLanguageKeyboard(
             ensured.user.locale,
-            ensured.user.primaryCurrency,
+            canonicalCurrency ?? ensured.user.primaryCurrency,
             this.#webAppUrl,
           ),
           signal,
@@ -567,9 +678,14 @@ export class OnboardingEngine {
     await this.#transport.sendMessage({ chatId, text, replyMarkup }, signal);
   }
 
+  #serverBankFlow(): BankChatFlow | undefined {
+    return this.#repository.ledgerMode() === 'server' ? this.#bankFlow : undefined;
+  }
+
   async #sendStart(
     chatId: string,
     user: StoredUser,
+    updateId: number,
     signal?: AbortSignal,
   ): Promise<void> {
     switch (user.stage) {
@@ -587,14 +703,40 @@ export class OnboardingEngine {
       case 'custom_name':
         await this.#send(chatId, customNamePrompt(user.locale), undefined, signal);
         return;
-      case 'complete':
+      case 'complete': {
+        const bankFlow = this.#serverBankFlow();
+        if (bankFlow !== undefined) {
+          await bankFlow.sendDashboard(chatId, user, updateId, signal);
+          return;
+        }
         await this.#send(
           chatId,
           launchText(user),
           summaryKeyboard(user.locale, this.#webAppUrl),
           signal,
         );
+        return;
+      }
     }
+  }
+
+  async #sendReady(
+    chatId: string,
+    user: StoredUser,
+    updateId: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const bankFlow = this.#serverBankFlow();
+    if (bankFlow !== undefined) {
+      await bankFlow.sendDashboard(chatId, user, updateId, signal);
+      return;
+    }
+    await this.#send(
+      chatId,
+      summaryText(user),
+      summaryKeyboard(user.locale, this.#webAppUrl),
+      signal,
+    );
   }
 
   async #attemptPendingReply(

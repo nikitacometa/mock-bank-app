@@ -2,8 +2,8 @@
   "compilerOptions": {
     "target": "ES2023",
     "lib": ["ES2023"],
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
@@ -13,11 +13,8 @@
     "erasableSyntaxOnly": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "noEmitOnError": true,
-    "rootDir": "bot",
-    "outDir": "bot/dist",
-    "sourceMap": true,
-    "types": ["node"]
+    "noEmit": true,
+    "types": ["node", "vite/client"]
   },
   "include": ["bot/**/*.ts"],
   "exclude": ["bot/dist", "bot/**/*.test.ts", "bot/vitest.config.ts"]

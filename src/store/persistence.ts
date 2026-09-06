@@ -1,3 +1,4 @@
+import { migrateBankStateV4, parseBankState as parseBankStateStrict } from '@/domain/bankState';
 import { ledgerErrors } from '@/domain/invariants';
 import { applySettleAll, epochDayUTC } from '@/domain/interest';
 import {
@@ -17,6 +18,7 @@ import type {
   Currency,
   ExchangeRateSnapshot,
   Profile,
+  RecurringRule,
   Transaction,
   TransactionFxSnapshot,
 } from '@/domain/types';
@@ -34,7 +36,7 @@ const LAUNCH_PREFERENCES_LOCK = TELEGRAM_RUNTIME
   ? `${LEGACY_TELEGRAM_NAMESPACE_ROOT}.launch-preferences`
   : `${WEB_NAMESPACE_ROOT}.launch-preferences`;
 const LAUNCH_PREFERENCES_RECEIPT_VERSION = 2;
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 interface PersistenceNamespace {
   readonly root: string;
@@ -128,6 +130,14 @@ export interface AppliedLaunchPreferencesReceipt {
 type UnknownRecord = Record<string, unknown>;
 
 const ACCOUNT_TYPES = ['checking', 'savings'] as const;
+const ACCOUNT_ROLES = [
+  'primary-checking',
+  'primary-savings',
+  'companion-1',
+  'companion-2',
+  'custom',
+] as const;
+const ACCOUNT_STATUSES = ['active', 'closed'] as const;
 const TRANSACTION_KINDS = [
   'purchase',
   'transfer_own_out',
@@ -136,11 +146,34 @@ const TRANSACTION_KINDS = [
   'interest',
   'topup',
   'seed',
+  'manual_income',
+  'manual_expense',
+  'balance_adjustment',
 ] as const;
 const TRANSACTION_STATUSES = ['posted', 'pending'] as const;
 const CARD_BRANDS = ['visa', 'mastercard'] as const;
 const CARD_DESIGNS = ['midnight', 'ivory', 'mint'] as const;
 const CARD_STATUSES = ['active', 'frozen'] as const;
+const CARD_FREEZE_REASONS = ['manual', 'account_closed'] as const;
+const RECURRING_DIRECTIONS = ['income', 'expense'] as const;
+const RECURRING_STATUSES = ['active', 'paused'] as const;
+const RECURRING_PAUSE_REASONS = [
+  'manual',
+  'account_closed',
+  'capacity',
+  'overflow',
+  'insufficient_funds',
+] as const;
+const FIXTURE_IDS = [
+  'owner-kzt-v1',
+  'synthetic-thb-v1',
+  'synthetic-vnd-v1',
+  'synthetic-rub-v1',
+  'synthetic-usd-v1',
+  'synthetic-eur-v1',
+  'synthetic-idr-v1',
+  'synthetic-gel-v1',
+] as const;
 const EXCHANGE_RATE_SOURCES = ['frankfurter', 'fallback'] as const;
 const RECENT_TRANSFER_IDS_CAP = 50;
 const MAX_PROFILE_DISPLAY_NAME_CODE_POINTS = 48;
@@ -233,6 +266,8 @@ function isAccount(value: unknown): value is Account {
   if (
     !isNonEmptyString(value.id) ||
     !isOneOf(value.type, ACCOUNT_TYPES) ||
+    !isOneOf(value.role, ACCOUNT_ROLES) ||
+    !isOneOf(value.status, ACCOUNT_STATUSES) ||
     !isNonEmptyString(value.name) ||
     !isCurrency(value.currency) ||
     !isNonEmptyString(value.number) ||
@@ -253,7 +288,11 @@ function isAccount(value: unknown): value is Account {
     value.type === 'savings'
       ? value.apy !== undefined && value.accrualAnchor !== undefined
       : value.apy === undefined && value.accrualAnchor === undefined;
-  return validApy && validAnchor && savingsFieldsMatchType;
+  const closeFieldsMatchStatus =
+    value.status === 'closed'
+      ? isIsoTimestamp(value.closedAt)
+      : value.closedAt === undefined;
+  return validApy && validAnchor && savingsFieldsMatchType && closeFieldsMatchStatus;
 }
 
 function isExchangeRateSnapshot(value: unknown): value is ExchangeRateSnapshot {
@@ -344,6 +383,18 @@ function isTransaction(value: unknown): value is Transaction {
     isOptional(value.category, isNonEmptyString) &&
     isOptional(value.transferGroupId, isNonEmptyString) &&
     isOptional(value.fxSnapshot, isFxSnapshot) &&
+    isOptional(value.note, isNonEmptyString) &&
+    isOptional(value.effectiveDate, isIsoDate) &&
+    isOptional(
+      value.recurringRuleId,
+      (ruleId): ruleId is string =>
+        typeof ruleId === 'string' && /^rr_[A-Za-z0-9_.:-]{1,92}$/.test(ruleId),
+    ) &&
+    isOptional(
+      value.occurrenceKey,
+      (key): key is string =>
+        typeof key === 'string' && /^rr_[A-Za-z0-9_.:-]{1,92}:\d{4}-\d{2}$/.test(key),
+    ) &&
     isIsoTimestamp(value.createdAt)
   );
 }
@@ -360,7 +411,39 @@ function isCard(value: unknown): value is Card {
     typeof value.expiry === 'string' &&
     /^(0[1-9]|1[0-2])\/\d{2}$/.test(value.expiry) &&
     isOneOf(value.design, CARD_DESIGNS) &&
-    isOneOf(value.status, CARD_STATUSES)
+    isOneOf(value.status, CARD_STATUSES) &&
+    isOptional(value.freezeReason, (reason): reason is Card['freezeReason'] & string =>
+      isOneOf(reason, CARD_FREEZE_REASONS),
+    ) &&
+    !(value.status === 'active' && value.freezeReason !== undefined)
+  );
+}
+
+function isRecurringRule(value: unknown): value is RecurringRule {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === 'string' &&
+    /^rr_[A-Za-z0-9_.:-]{1,92}$/.test(value.id) &&
+    isNonEmptyString(value.accountId) &&
+    isOneOf(value.direction, RECURRING_DIRECTIONS) &&
+    isSafeInteger(value.amountMinor) &&
+    value.amountMinor > 0 &&
+    isNonEmptyString(value.counterparty) &&
+    isOptional(value.note, isNonEmptyString) &&
+    isNonEmptyString(value.category) &&
+    value.cadence === 'monthly' &&
+    isSafeInteger(value.anchorDay) &&
+    value.anchorDay >= 1 &&
+    value.anchorDay <= 31 &&
+    isIsoDate(value.startsOn) &&
+    isIsoDate(value.nextOccurrence) &&
+    value.nextOccurrence >= value.startsOn &&
+    isOneOf(value.status, RECURRING_STATUSES) &&
+    isOptional(value.pauseReason, (reason): reason is RecurringRule['pauseReason'] & string =>
+      isOneOf(reason, RECURRING_PAUSE_REASONS),
+    ) &&
+    (value.status === 'active') === (value.pauseReason === undefined) &&
+    isIsoTimestamp(value.createdAt)
   );
 }
 
@@ -469,35 +552,35 @@ function canSettleAtLoadBoundary(state: BankState, nowISO: string): boolean {
 
 /** Runtime boundary: validate untrusted JSON and return only known BankState fields. */
 function parseBankState(s: unknown, nowISO: string): BankState | null {
+  const strict = parseBankStateStrict(s, nowISO);
+  if (strict === null) return null;
   if (!isRecord(s)) return null;
   if (
     !isCurrency(s.primaryCurrency) ||
+    !isCurrency(s.demoBaseCurrency) ||
+    !isOneOf(s.fixtureId, FIXTURE_IDS) ||
     !isExchangeRateSnapshot(s.exchangeRates) ||
     !isArrayOf(s.accounts, isAccount) ||
     s.accounts.length === 0 ||
+    s.accounts.length > 24 ||
     !isArrayOf(s.transactions, isTransaction) ||
+    s.transactions.length > 5_000 ||
     !isArrayOf(s.cards, isCard) ||
     !isArrayOf(s.contacts, isContact) ||
     !isProfile(s.profile) ||
     !isSafeInteger(s.nextSeq) ||
     s.nextSeq <= 0 ||
     !isArrayOf(s.recentTransferIds, isClientTransferId) ||
-    s.recentTransferIds.length > RECENT_TRANSFER_IDS_CAP
+    s.recentTransferIds.length > RECENT_TRANSFER_IDS_CAP ||
+    !isArrayOf(s.recurringRules, isRecurringRule) ||
+    s.recurringRules.length > 64
   ) {
     return null;
   }
 
-  const candidate: BankState = {
-    primaryCurrency: s.primaryCurrency,
-    exchangeRates: s.exchangeRates,
-    accounts: s.accounts,
-    transactions: s.transactions,
-    cards: s.cards,
-    contacts: s.contacts,
-    profile: s.profile,
-    nextSeq: s.nextSeq,
-    recentTransferIds: s.recentTransferIds,
-  };
+  // The shared boundary has already rebuilt every nested entity from known
+  // fields. Never return the original untrusted objects after validating them.
+  const candidate: BankState = strict;
   const accountIds = new Set(candidate.accounts.map((account) => account.id));
   const lastSeq = candidate.transactions.at(-1)?.seq ?? 0;
 
@@ -506,12 +589,14 @@ function parseBankState(s: unknown, nowISO: string): BankState | null {
     hasUniqueIds(candidate.transactions) &&
     hasUniqueIds(candidate.cards) &&
     hasUniqueIds(candidate.contacts) &&
+    hasUniqueIds(candidate.recurringRules) &&
     new Set(candidate.recentTransferIds).size === candidate.recentTransferIds.length &&
     candidate.transactions.every(
       (transaction) =>
         transaction.id === `tx_${transaction.seq}` && accountIds.has(transaction.accountId),
     ) &&
     candidate.cards.every((card) => accountIds.has(card.accountId)) &&
+    candidate.recurringRules.every((rule) => accountIds.has(rule.accountId)) &&
     candidate.nextSeq === lastSeq + 1 &&
     hasValidTransferGroups(candidate.transactions, candidate.accounts) &&
     ledgerErrors(candidate).length === 0 &&
@@ -538,8 +623,13 @@ function loadPersistedFromKey(
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!isRecord(parsed)) return { kind: 'corrupted' };
-    if (parsed.schemaVersion !== SCHEMA_VERSION) return { kind: 'corrupted' };
-    const state = parseBankState(parsed.state, new Date().toISOString());
+    const nowISO = new Date().toISOString();
+    const state =
+      parsed.schemaVersion === SCHEMA_VERSION
+        ? parseBankState(parsed.state, nowISO)
+        : parsed.schemaVersion === 4
+          ? migrateBankStateV4(parsed.state, nowISO, { expectedTelegramId })
+          : null;
     if (state === null) return { kind: 'corrupted' };
     if (
       expectedTelegramId !== undefined &&

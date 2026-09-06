@@ -3,6 +3,8 @@
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it } from 'vitest';
+import { useBankStore } from '@/store/bankStore';
+import { useUiStore } from '@/store/uiStore';
 import { Cards } from './Cards';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
@@ -107,6 +109,68 @@ describe('Cards mouse drag', () => {
     } finally {
       await act(async () => root.unmount());
       container.remove();
+    }
+  });
+
+  it('shows a useful empty state when no active account owns a card', async () => {
+    const previousBank = useBankStore.getState();
+    const previousUi = useUiStore.getState();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+
+    try {
+      useUiStore.setState({ ...previousUi, locale: 'en' }, true);
+      useBankStore.setState({
+        ...previousBank,
+        accounts: previousBank.accounts.map((account) => ({
+          ...account,
+          status: 'closed' as const,
+          closedAt: '2026-09-05T00:00:00.000Z',
+        })),
+      }, true);
+      await act(async () => root.render(createElement(Cards)));
+
+      expect(container.textContent).toContain('No active cards');
+      expect(container.textContent).toContain('Restore an account in the Telegram bot.');
+      expect(container.querySelector('[role="status"]')).toBeNull();
+      expect(container.querySelector('[data-card]')).toBeNull();
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      useBankStore.setState(previousBank, true);
+      useUiStore.setState(previousUi, true);
+    }
+  });
+
+  it('keeps a custom account label exact when it matches fixture copy', async () => {
+    const previousBank = useBankStore.getState();
+    const previousUi = useUiStore.getState();
+    const card = previousBank.cards[0];
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+
+    try {
+      useUiStore.setState({ ...previousUi, locale: 'ru' }, true);
+      useBankStore.setState({
+        ...previousBank,
+        accounts: previousBank.accounts.map((account) =>
+          account.id === card.accountId
+            ? { ...account, role: 'custom' as const, name: 'Current' }
+            : account,
+        ),
+      }, true);
+      await act(async () => root.render(createElement(Cards)));
+
+      const firstCard = container.querySelector<HTMLElement>('[data-card]');
+      expect(firstCard?.textContent).toContain('Current');
+      expect(firstCard?.textContent).not.toContain('Текущий');
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      useBankStore.setState(previousBank, true);
+      useUiStore.setState(previousUi, true);
     }
   });
 });

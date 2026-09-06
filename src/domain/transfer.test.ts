@@ -34,11 +34,15 @@ function seeded(
 ): BankState {
   return {
     primaryCurrency: checkingCurrency,
+    demoBaseCurrency: 'RUB',
+    fixtureId: 'synthetic-rub-v1',
     exchangeRates: EXCHANGE_RATES,
     accounts: [
       {
         id: CHECKING_ID,
         type: 'checking',
+        role: 'primary-checking',
+        status: 'active',
         name: 'Текущий',
         currency: checkingCurrency,
         number: '40817810200001548753',
@@ -47,6 +51,8 @@ function seeded(
       {
         id: SAVINGS_ID,
         type: 'savings',
+        role: 'primary-savings',
+        status: 'active',
         name: 'Накопительный',
         currency: savingsCurrency,
         number: '42301810900002013416',
@@ -84,6 +90,7 @@ function seeded(
     profile: { displayName: 'Никита' },
     nextSeq: 3,
     recentTransferIds: [],
+    recurringRules: [],
   };
 }
 
@@ -268,6 +275,22 @@ describe('applyTransfer — own accounts', () => {
     });
     expect(out).toEqual({ ok: false, error: 'insufficient_funds' });
     expect(state.transactions.length).toBe(seeded().transactions.length);
+  });
+
+  it('rejects a transfer above the USD command ceiling before ledger mutation', () => {
+    const state = seeded('USD', 'RUB');
+    const transactionsBefore = state.transactions;
+    const out = applyTransfer(state, {
+      fromAccountId: CHECKING_ID,
+      toContactId: state.contacts[0].id,
+      amountMinor: 10_000_001,
+      clientTransferId: 'ct_amount_ceiling',
+      nowISO: LATER_SAME_DAY,
+    });
+
+    expect(out).toEqual({ ok: false, error: 'amount_too_large' });
+    expect(state.transactions).toBe(transactionsBefore);
+    expect(state.recentTransferIds).not.toContain('ct_amount_ceiling');
   });
 
   it('rejects a target balance overflow without committing either transfer leg', () => {
