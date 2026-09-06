@@ -14,6 +14,9 @@ type BotApiMethod =
   | 'answerCallbackQuery'
   | 'deleteWebhook'
   | 'getMe'
+  | 'getMyDescription'
+  | 'getMyName'
+  | 'getMyShortDescription'
   | 'getUpdates'
   | 'getWebhookInfo'
   | 'sendMessage'
@@ -22,6 +25,12 @@ type BotApiMethod =
   | 'setMyDescription'
   | 'setMyName'
   | 'setMyShortDescription';
+
+const PROFILE_METHODS = {
+  name: { get: 'getMyName', set: 'setMyName' },
+  description: { get: 'getMyDescription', set: 'setMyDescription' },
+  short_description: { get: 'getMyShortDescription', set: 'setMyShortDescription' },
+} as const;
 
 type FetchImplementation = (
   input: string | URL | Request,
@@ -197,10 +206,7 @@ export class BotApiClient implements BotTransport {
   }
 
   async setMyName(name: string, languageCode?: string, signal?: AbortSignal): Promise<void> {
-    await this.#call('setMyName', {
-      name,
-      ...(languageCode === undefined ? {} : { language_code: languageCode }),
-    }, signal);
+    await this.#reconcileProfileField('name', name, languageCode, signal);
   }
 
   async setMyDescription(
@@ -208,10 +214,7 @@ export class BotApiClient implements BotTransport {
     languageCode?: string,
     signal?: AbortSignal,
   ): Promise<void> {
-    await this.#call('setMyDescription', {
-      description,
-      ...(languageCode === undefined ? {} : { language_code: languageCode }),
-    }, signal);
+    await this.#reconcileProfileField('description', description, languageCode, signal);
   }
 
   async setMyShortDescription(
@@ -219,10 +222,24 @@ export class BotApiClient implements BotTransport {
     languageCode?: string,
     signal?: AbortSignal,
   ): Promise<void> {
-    await this.#call('setMyShortDescription', {
-      short_description: shortDescription,
-      ...(languageCode === undefined ? {} : { language_code: languageCode }),
-    }, signal);
+    await this.#reconcileProfileField('short_description', shortDescription, languageCode, signal);
+  }
+
+  async #reconcileProfileField(
+    field: keyof typeof PROFILE_METHODS,
+    desired: string,
+    languageCode?: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const methods = PROFILE_METHODS[field];
+    const locale = languageCode === undefined ? {} : { language_code: languageCode };
+    const result = await this.#call(methods.get, locale, signal);
+    if (typeof result !== 'object' || result === null || Array.isArray(result) ||
+      typeof (result as Record<string, unknown>)[field] !== 'string') {
+      throw new Error(`Telegram returned invalid bot profile: ${field}`);
+    }
+    if ((result as Record<string, unknown>)[field] === desired) return;
+    await this.#call(methods.set, { [field]: desired, ...locale }, signal);
   }
 
   async getMe(signal?: AbortSignal): Promise<void> {

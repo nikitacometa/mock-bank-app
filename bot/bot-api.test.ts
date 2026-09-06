@@ -5,6 +5,11 @@ import type { ServiceLogger } from './logger.js';
 
 const TOKEN = ['123456', 'synthetic_token_that_is_long_enough_for_tests'].join(':');
 const WEB_APP_URL = new URL('https://euphoria.bot/');
+const PROFILE_FIELDS = [
+  { field: 'name', get: 'getMyName', set: 'setMyName' },
+  { field: 'description', get: 'getMyDescription', set: 'setMyDescription' },
+  { field: 'short_description', get: 'getMyShortDescription', set: 'setMyShortDescription' },
+] as const;
 
 interface CapturedCall {
   readonly url: string;
@@ -30,6 +35,15 @@ function telegramErrorResponse(errorCode: number, retryAfter?: number): Response
   });
 }
 
+function emptyProfileResponses(): Response[] {
+  return [
+    ...Array.from({ length: 4 }, () => jsonResponse(true)),
+    ...PROFILE_FIELDS.flatMap(({ field }) => [undefined, 'ru', 'en'].flatMap(() => [
+      jsonResponse({ [field]: '' }), jsonResponse(true),
+    ])),
+  ];
+}
+
 function capturingFetch(
   results: readonly Response[],
   calls: CapturedCall[],
@@ -47,6 +61,58 @@ function capturingFetch(
 }
 
 describe('BotApiClient', () => {
+  it.each(PROFILE_FIELDS)('skips unchanged $field for each locale even when its SET would be rate limited', async ({ field, get, set }) => {
+    for (const locale of [undefined, 'ru', 'en']) {
+      const calls: CapturedCall[] = [];
+      const client = new BotApiClient(TOKEN, WEB_APP_URL, capturingFetch([
+        jsonResponse({ [field]: 'Cometa' }), telegramErrorResponse(429, 300),
+      ], calls));
+      await client[set]('Cometa', locale);
+      expect(calls.map(call => new URL(call.url).pathname.split('/').at(-1))).toEqual([get]);
+      expect(calls[0]?.body).toEqual(locale === undefined ? {} : { language_code: locale });
+    }
+  });
+
+  it.each(PROFILE_FIELDS)('writes changed $field with exact text and the same locale as its GET', async ({ field, get, set }) => {
+    for (const locale of [undefined, 'ru', 'en']) {
+      const calls: CapturedCall[] = [];
+      const client = new BotApiClient(TOKEN, WEB_APP_URL, capturingFetch([
+        jsonResponse({ [field]: 'Cometa ' }), jsonResponse(true),
+      ], calls));
+      await client[set]('Cometa', locale);
+      expect(calls.map(call => new URL(call.url).pathname.split('/').at(-1))).toEqual([get, set]);
+      expect(calls[0]?.body).toEqual(locale === undefined ? {} : { language_code: locale });
+      expect(calls[1]?.body).toEqual({ [field]: 'Cometa', ...(locale === undefined ? {} : { language_code: locale }) });
+    }
+  });
+
+  it.each(PROFILE_FIELDS)('fails closed without writing $field when its GET is malformed', async ({ field, get, set }) => {
+    for (const result of [null, [], {}, true, { [field]: 42 }, { [field]: null }]) {
+      const calls: CapturedCall[] = [];
+      const client = new BotApiClient(TOKEN, WEB_APP_URL, capturingFetch([jsonResponse(result)], calls));
+      await expect(client[set]('Cometa', 'ru')).rejects.toThrow('invalid bot profile');
+      expect(calls.map(call => new URL(call.url).pathname.split('/').at(-1))).toEqual([get]);
+    }
+  });
+
+  it.each(PROFILE_FIELDS)('preserves rejected GET metadata without writing $field', async ({ get, set }) => {
+    for (const status of [400, 429, 500]) {
+      const calls: CapturedCall[] = [];
+      const client = new BotApiClient(TOKEN, WEB_APP_URL, capturingFetch([telegramErrorResponse(status, 37)], calls));
+      await expect(client[set]('Cometa', 'en')).rejects.toMatchObject({ method: get, status, retryAfter: 37 });
+      expect(calls.map(call => new URL(call.url).pathname.split('/').at(-1))).toEqual([get]);
+    }
+  });
+
+  it.each(PROFILE_FIELDS)('preserves rate-limited SET metadata when $field really differs', async ({ field, get, set }) => {
+    const calls: CapturedCall[] = [];
+    const client = new BotApiClient(TOKEN, WEB_APP_URL, capturingFetch([
+      jsonResponse({ [field]: '' }), telegramErrorResponse(429, 300),
+    ], calls));
+    await expect(client[set]('Cometa')).rejects.toMatchObject({ method: set, status: 429, retryAfter: 300 });
+    expect(calls.map(call => new URL(call.url).pathname.split('/').at(-1))).toEqual([get, set]);
+  });
+
   it('reconciles an existing webhook without dropping pending updates', async () => {
     const calls: CapturedCall[] = [];
     const client = new BotApiClient(
@@ -184,7 +250,7 @@ describe('BotApiClient', () => {
   it('configures the bot profile, localized commands, and default Web App menu', async () => {
     const calls: CapturedCall[] = [];
     const responses = [jsonResponse({ id: 1, is_bot: true })];
-    responses.push(...Array.from({ length: 13 }, () => jsonResponse(true)));
+    responses.push(...emptyProfileResponses());
     const client = new BotApiClient(TOKEN, WEB_APP_URL, capturingFetch(responses, calls));
 
     await setupBotProfile(client, new AbortController().signal);
@@ -196,14 +262,23 @@ describe('BotApiClient', () => {
       'setMyCommands',
       'setMyCommands',
       'setMyCommands',
+      'getMyName',
       'setMyName',
+      'getMyName',
       'setMyName',
+      'getMyName',
       'setMyName',
+      'getMyDescription',
       'setMyDescription',
+      'getMyDescription',
       'setMyDescription',
+      'getMyDescription',
       'setMyDescription',
+      'getMyShortDescription',
       'setMyShortDescription',
+      'getMyShortDescription',
       'setMyShortDescription',
+      'getMyShortDescription',
       'setMyShortDescription',
     ]);
     expect(calls[1]?.body).toEqual({
@@ -230,18 +305,20 @@ describe('BotApiClient', () => {
     let inFlight = 0;
     let maxInFlight = 0;
     let callCount = 0;
-    const client = new BotApiClient(TOKEN, WEB_APP_URL, async () => {
+    const client = new BotApiClient(TOKEN, WEB_APP_URL, async input => {
       callCount += 1;
       inFlight += 1;
       maxInFlight = Math.max(maxInFlight, inFlight);
       await Promise.resolve();
       inFlight -= 1;
-      return jsonResponse(callCount === 1 ? { id: 1, is_bot: true } : true);
+      const method = new URL(input instanceof Request ? input.url : input.toString()).pathname.split('/').at(-1);
+      const profile = PROFILE_FIELDS.find(candidate => candidate.get === method);
+      return jsonResponse(profile ? { [profile.field]: '' } : callCount === 1 ? { id: 1, is_bot: true } : true);
     });
 
     await setupBotProfile(client, new AbortController().signal);
 
-    expect(callCount).toBe(14);
+    expect(callCount).toBe(23);
     expect(maxInFlight).toBe(1);
   });
 
@@ -251,7 +328,7 @@ describe('BotApiClient', () => {
       jsonResponse({ url: '', pending_update_count: 0 }),
       telegramErrorResponse(429, 2),
       jsonResponse({ id: 1, is_bot: true }),
-      ...Array.from({ length: 13 }, () => jsonResponse(true)),
+      ...emptyProfileResponses(),
     ];
     const client = new BotApiClient(TOKEN, WEB_APP_URL, capturingFetch(responses, calls));
     const warnings: Array<{ event: string; context?: Readonly<Record<string, string | number | boolean>> }> = [];
@@ -298,6 +375,8 @@ describe('BotApiClient', () => {
         return jsonResponse({ url: '', pending_update_count: 0 });
       }
       if (method === 'getMe') return jsonResponse({ id: 1, is_bot: true });
+      const profile = PROFILE_FIELDS.find(candidate => candidate.get === method);
+      if (profile) return jsonResponse({ [profile.field]: '' });
       if (
         method === 'setMyShortDescription' &&
         call.body.language_code === 'en' &&
@@ -345,6 +424,49 @@ describe('BotApiClient', () => {
         errorCode: 500,
       },
     }]);
+  });
+
+  it('reconciles an already-applied SET on retry and skips cosmetic writes on the next startup', async () => {
+    const values = new Map<string, string>();
+    const methods: string[] = [];
+    let ambiguousNameWrite = true;
+    const client = new BotApiClient(TOKEN, WEB_APP_URL, async (input, init) => {
+      const method = new URL(input instanceof Request ? input.url : input.toString()).pathname.split('/').at(-1) ?? '';
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      methods.push(method);
+      if (method === 'getWebhookInfo') return jsonResponse({ url: '', pending_update_count: 0 });
+      if (method === 'getMe') return jsonResponse({ id: 1, is_bot: true });
+      const profile = PROFILE_FIELDS.find(candidate => candidate.get === method || candidate.set === method);
+      if (!profile) return jsonResponse(true);
+      const key = `${profile.field}:${body.language_code ?? 'default'}`;
+      if (method === profile.get) return jsonResponse({ [profile.field]: values.get(key) ?? '' });
+      values.set(key, String(body[profile.field]));
+      if (method === 'setMyName' && body.language_code === undefined && ambiguousNameWrite) {
+        ambiguousNameWrite = false;
+        return telegramErrorResponse(500);
+      }
+      return jsonResponse(true);
+    });
+    const retries: Array<{ step: unknown; retryMs: unknown }> = [];
+    const logger: ServiceLogger = {
+      info: () => undefined, error: () => undefined,
+      warn: (_event, context) => retries.push({ step: context?.step, retryMs: context?.retryMs }),
+    };
+    const sleeps: number[] = [];
+    const options = { sleep: async (milliseconds: number) => { sleeps.push(milliseconds); } };
+    await setupBotForPolling(client, new AbortController().signal, logger, options);
+    expect(methods.filter(method => method === 'getMyName')).toHaveLength(4);
+    expect(methods.filter(method => method === 'setMyName')).toHaveLength(3);
+    expect(values.get('name:default')).toBe('Cometa');
+    expect(values.size).toBe(9);
+    expect(sleeps).toEqual([1_000]);
+    expect(retries).toEqual([{ step: 'profile.name.default', retryMs: 1_000 }]);
+    const writes = methods.filter(method => PROFILE_FIELDS.some(profile => profile.set === method));
+    expect(writes).toHaveLength(9);
+    await setupBotForPolling(client, new AbortController().signal, logger, options);
+    expect(methods.filter(method => PROFILE_FIELDS.some(profile => profile.set === method))).toEqual(writes);
+    expect(methods.filter(method => method === 'setMyCommands')).toHaveLength(6);
+    expect(methods.filter(method => method === 'setChatMenuButton')).toHaveLength(2);
   });
 
   it('fails setup when the total startup deadline expires during a retry', async () => {
