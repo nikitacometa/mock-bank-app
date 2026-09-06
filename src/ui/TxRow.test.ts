@@ -27,7 +27,7 @@ function renderTransaction(
     kind: 'purchase',
     counterparty: 'Городское такси',
     category: 'transport',
-    createdAt: new Date(2026, 8, 1, 19, 34).toISOString(),
+    createdAt: '2026-09-01T19:34:00.000Z',
     ...overrides,
   };
   return renderToStaticMarkup(createElement(TxRow, { tx, currency: 'KZT', ...context }));

@@ -107,8 +107,9 @@ export function History() {
 
   return (
     <div className="px-4 pb-28" style={{ paddingTop: 'calc(var(--safe-top) + 0.75rem)' }}>
-      <header className="px-1 py-2.5">
+      <header className="flex items-center justify-between px-1 py-2.5">
         <h1 className="text-[1.375rem] font-semibold tracking-tight">{t('history.title')}</h1>
+        <span className="num text-[0.6875rem] tracking-widest text-ink-3">UTC</span>
       </header>
 
       <div className="scrollbar-none -mx-4 overflow-x-auto px-4">

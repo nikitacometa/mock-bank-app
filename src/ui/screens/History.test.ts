@@ -2,10 +2,11 @@
 
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyCloseAccount } from '@/domain/accountLifecycle';
 import { applyBalanceAdjustment } from '@/domain/manualTransactions';
 import { buildSeed } from '@/domain/seed';
+import type { Transaction } from '@/domain/types';
 import { currencyName } from '@/i18n';
 import { useBankStore } from '@/store/bankStore';
 import { useUiStore } from '@/store/uiStore';
@@ -159,6 +160,85 @@ describe('History rendering window', () => {
     } finally {
       await act(async () => root.unmount());
       container.remove();
+      useBankStore.setState(previousBank, true);
+      useUiStore.setState(previousUi, true);
+    }
+  });
+
+  it.each([
+    { timeZone: 'Asia/Bangkok', hour: '23', transferTime: '11:40 PM', manualTime: '11:45 PM' },
+    { timeZone: 'America/New_York', hour: '00', transferTime: '12:40 AM', manualTime: '12:45 AM' },
+  ])('renders mixed manual and transfer rows under one UTC Today group in $timeZone', async ({
+    timeZone, hour, transferTime, manualTime,
+  }) => {
+    const environment = (
+      globalThis as typeof globalThis & {
+        process?: { env: Record<string, string | undefined> };
+      }
+    ).process?.env;
+    if (environment === undefined) throw new Error('test runtime has no process environment');
+    const originalTimeZone = environment.TZ;
+    const previousBank = useBankStore.getState();
+    const previousUi = useUiStore.getState();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const nowISO = `2026-09-06T${hour}:50:00.000Z`;
+    const transaction = (overrides: Partial<Transaction>): Transaction => ({
+      id: 'tx_utc_history', accountId: 'acc_checking', seq: 1,
+      amountMinor: -1_000, balanceAfterMinor: 9_000,
+      kind: 'transfer_contact', counterparty: 'Yesterday transfer', category: 'transfer',
+      createdAt: `2026-09-05T${hour}:40:00.000Z`, ...overrides,
+    });
+
+    try {
+      environment.TZ = timeZone;
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date(nowISO));
+      // This regression must actually run across the local/UTC day boundary.
+      expect(new Date(nowISO).getDate()).not.toBe(6);
+      const yesterdayTransfer = transaction({ id: 'tx_yesterday_transfer' });
+      const todayTransfer = transaction({
+        id: 'tx_today_transfer', seq: 2, counterparty: 'Today transfer',
+        createdAt: `2026-09-06T${hour}:40:00.000Z`,
+      });
+      const yesterdayManual = transaction({
+        id: 'tx_yesterday_manual', seq: 3, kind: 'manual_expense',
+        counterparty: 'Yesterday manual', category: 'other', effectiveDate: '2026-09-05',
+        createdAt: `2026-09-06T${hour}:43:00.000Z`,
+      });
+      const todayManual = transaction({
+        id: 'tx_today_manual', seq: 4, kind: 'manual_expense',
+        counterparty: 'Today manual', category: 'other', effectiveDate: '2026-09-06',
+        createdAt: `2026-09-06T${hour}:45:00.000Z`,
+      });
+      useBankStore.setState({
+        ...buildSeed(nowISO),
+        transactions: [todayTransfer, yesterdayManual, yesterdayTransfer, todayManual],
+      });
+      useUiStore.setState({ activeAccountId: 'acc_checking', locale: 'en' });
+      await act(async () => root.render(createElement(History)));
+
+      expect([...container.querySelectorAll('h2')].map((heading) => heading.textContent))
+        .toEqual(['Today', 'Yesterday']);
+      const groups = [...container.querySelectorAll('section')];
+      expect(groups).toHaveLength(2);
+      const rows = groups.map((group) =>
+        [...group.querySelectorAll('.min-h-15')].map((row) => row.textContent));
+      expect(rows).toEqual([
+        [expect.stringContaining('Today manual'), expect.stringContaining('Today transfer')],
+        [expect.stringContaining('Yesterday manual'), expect.stringContaining('Yesterday transfer')],
+      ]);
+      expect(rows[0][0]).toContain(`Other · ${manualTime}`);
+      expect(rows[0][1]).toContain(`Transfer · ${transferTime}`);
+      expect(rows[1][1]).toContain(`Transfer · ${transferTime}`);
+      expect(rows[1][0]).not.toMatch(/\d{1,2}:\d{2}/);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      vi.useRealTimers();
+      if (originalTimeZone === undefined) delete environment.TZ;
+      else environment.TZ = originalTimeZone;
       useBankStore.setState(previousBank, true);
       useUiStore.setState(previousUi, true);
     }

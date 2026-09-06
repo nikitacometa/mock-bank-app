@@ -73,8 +73,8 @@ validate_docker_socket_listener() {
   [[ "${daemon_pid}" =~ ^[0-9]+$ ]] && (( daemon_pid > 1 )) || \
     fail 'Docker socket listener daemon PID is invalid'
   line_prefix='^u_str[[:space:]]+LISTEN[[:space:]]+[0-9]+[[:space:]]+[0-9]+[[:space:]]+/run/docker[.]sock[[:space:]]+[0-9]+[[:space:]]+[*][[:space:]]+[0-9]+[[:space:]]+'
-  owner_order_one="users:\(\(\"dockerd\",pid=${daemon_pid},fd=[0-9]+\),\(\"systemd\",pid=1,fd=[0-9]+\)\)$"
-  owner_order_two="users:\(\(\"systemd\",pid=1,fd=[0-9]+\),\(\"dockerd\",pid=${daemon_pid},fd=[0-9]+\)\)$"
+  owner_order_one="users:\(\(\"dockerd\",pid=${daemon_pid},fd=[0-9]+\),\(\"systemd\",pid=1,fd=[0-9]+\)\)[[:blank:]]*$"
+  owner_order_two="users:\(\(\"systemd\",pid=1,fd=[0-9]+\),\(\"dockerd\",pid=${daemon_pid},fd=[0-9]+\)\)[[:blank:]]*$"
   [[ "${listener_line}" =~ ${line_prefix}${owner_order_one} || \
     "${listener_line}" =~ ${line_prefix}${owner_order_two} ]] || \
     fail 'pinned Docker socket is not owned exclusively by docker.service and systemd socket activation'

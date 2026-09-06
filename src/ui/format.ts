@@ -63,10 +63,11 @@ const RATE_DATE_FORMATTERS: Readonly<
   },
 };
 
+/** Transaction clocks use the same UTC calendar as ledger grouping and bot dates. */
 export function fmtTime(iso: string, locale: AppLocale = 'ru'): string {
   const date = new Date(iso);
-  const hours = date.getHours();
-  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const hours = date.getUTCHours();
+  const minutes = String(date.getUTCMinutes()).padStart(2, '0');
   if (locale === 'ru') return `${String(hours).padStart(2, '0')}:${minutes}`;
 
   const meridiem = hours < 12 ? 'AM' : 'PM';
@@ -102,21 +103,18 @@ function utcYesterday(date: Date): string {
   ).toISOString().slice(0, 10);
 }
 
-/** Ledger rows added later can belong to an earlier UTC banking date. */
+/** All ledger rows share UTC; backfilled rows can belong to an earlier banking date. */
 export function transactionDayKey(transaction: Transaction): string {
-  return transaction.effectiveDate ?? dayKey(transaction.createdAt);
+  return transaction.effectiveDate ?? new Date(transaction.createdAt).toISOString().slice(0, 10);
 }
 
-/** Format an explicit banking date without letting the viewer timezone shift it. */
+/** Format the banking date without letting the viewer timezone shift it. */
 export function fmtTransactionDay(
   transaction: Transaction,
   locale: AppLocale = 'ru',
   now = new Date(),
 ): string {
-  if (transaction.effectiveDate === undefined) {
-    return fmtDay(transaction.createdAt, locale, now);
-  }
-  const date = transaction.effectiveDate;
+  const date = transactionDayKey(transaction);
   if (date === now.toISOString().slice(0, 10)) return translate(locale, 'date.today');
   if (date === utcYesterday(now)) return translate(locale, 'date.yesterday');
   const [year, month, day] = date.split('-').map(Number);

@@ -560,6 +560,7 @@ load_recovery_marker() {
     [[ "${next_is_valid}" == true ]] || return 1
     if (( load_status == 10 )); then
       set_marker_record "${next_record}" || return 1
+      [[ "${apply:-false}" == true ]] || return 12
       mv -fT -- "${recovery_marker_next}" "${recovery_marker}" || return 1
       sync -f "${config_directory}" || return 1
       return 0
@@ -568,11 +569,13 @@ load_recovery_marker() {
     marker_record_matches_transaction "${next_record}" "${next_phase}" || return 1
     case "${main_phase}:${next_phase}" in
       install:rollback)
+        set_marker_record "${next_record}" || return 1
+        [[ "${apply:-false}" == true ]] || return 12
         mv -fT -- "${recovery_marker_next}" "${recovery_marker}" || return 1
         sync -f "${config_directory}" || return 1
-        set_marker_record "${next_record}" || return 1
         ;;
       install:install|rollback:rollback)
+        [[ "${apply:-false}" == true ]] || return 12
         unlink -- "${recovery_marker_next}" || return 1
         sync -f "${config_directory}" || return 1
         ;;
@@ -878,6 +881,12 @@ if (( recovery_status == 0 )); then
 elif (( recovery_status == 11 )); then
   printf '%s\n' \
     'An uncommitted Docker perimeter journal candidate needs cleanup.' \
+    'Rerun with: install-docker-perimeter.sh --apply'
+  exit 0
+elif (( recovery_status == 12 )); then
+  printf '%s\n' \
+    'An uncommitted Docker perimeter journal candidate is ready to reconcile.' \
+    "Apply will reconcile the candidate and resume recovery in phase ${marker_phase}." \
     'Rerun with: install-docker-perimeter.sh --apply'
   exit 0
 elif (( recovery_status != 10 )); then

@@ -56,13 +56,13 @@ describe('localized UI formatting', () => {
   });
 
   it('formats transaction time for the selected interface locale', () => {
-    const localTime = new Date(2026, 8, 1, 18, 5).toISOString();
+    const bankingTime = '2026-09-01T18:05:00.000Z';
 
-    expect(fmtTime(localTime, 'ru')).toBe('18:05');
-    expect(fmtTime(localTime, 'en')).toBe('6:05 PM');
+    expect(fmtTime(bankingTime, 'ru')).toBe('18:05');
+    expect(fmtTime(bankingTime, 'en')).toBe('6:05 PM');
   });
 
-  it('tracks a runtime device time-zone change without stale formatter state', () => {
+  it('keeps the UTC banking clock stable across a runtime device time-zone change', () => {
     const environment = (
       globalThis as typeof globalThis & {
         process?: { env: Record<string, string | undefined> };
@@ -75,12 +75,50 @@ describe('localized UI formatting', () => {
       expect(fmtTime('2026-09-01T12:34:00.000Z', 'en')).toBe('12:34 PM');
 
       environment.TZ = 'America/New_York';
-      expect(fmtTime('2026-09-01T12:34:00.000Z', 'en')).toBe('8:34 AM');
+      expect(fmtTime('2026-09-01T12:34:00.000Z', 'en')).toBe('12:34 PM');
     } finally {
       if (originalTimeZone === undefined) delete environment.TZ;
       else environment.TZ = originalTimeZone;
     }
   });
+
+  it.each(['Asia/Bangkok', 'America/New_York', 'Pacific/Kiritimati'])(
+    'groups mixed ledger rows and labels today on the same UTC calendar in %s', (timeZone) => {
+      const environment = (
+        globalThis as typeof globalThis & {
+          process?: { env: Record<string, string | undefined> };
+        }
+      ).process?.env;
+      if (environment === undefined) throw new Error('test runtime has no process environment');
+      const originalTimeZone = environment.TZ;
+      environment.TZ = timeZone;
+      try {
+        for (const createdAt of ['2026-09-02T22:30:00.000Z', '2026-09-03T00:30:00.000Z']) {
+          const transfer: Transaction = {
+            id: 'tx_utc_transfer', accountId: 'acc_checking', seq: 1,
+            amountMinor: -100, balanceAfterMinor: 900, kind: 'transfer_own_out', createdAt,
+          };
+          const expense: Transaction = {
+            ...transfer, id: 'tx_utc_expense', seq: 2, kind: 'manual_expense',
+            effectiveDate: createdAt.slice(0, 10),
+          };
+          const now = new Date(createdAt);
+          expect(transactionDayKey(transfer)).toBe(createdAt.slice(0, 10));
+          expect(transactionDayKey(expense)).toBe(transactionDayKey(transfer));
+          expect(fmtTransactionDay(transfer, 'en', now)).toBe('Today');
+          expect(fmtTransactionDay(expense, 'en', now)).toBe('Today');
+          expect(fmtTransactionDay(transfer, 'ru', now)).toBe('Сегодня');
+          const nextDay = new Date(now.getTime() + 86_400_000);
+          expect(fmtTransactionDay(transfer, 'en', nextDay)).toBe('Yesterday');
+          expect(fmtTransactionDay(expense, 'en', nextDay)).toBe('Yesterday');
+          expect(fmtTime(createdAt, 'ru')).toBe(createdAt.slice(11, 16));
+        }
+      } finally {
+        if (originalTimeZone === undefined) delete environment.TZ;
+        else environment.TZ = originalTimeZone;
+      }
+    },
+  );
 
   it('localizes category and known demo data while preserving unknown user text', () => {
     expect(categoryLabel('groceries', 'en')).toBe('Groceries');

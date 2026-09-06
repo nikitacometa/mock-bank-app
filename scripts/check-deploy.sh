@@ -498,7 +498,9 @@ bash -c '
     >"${source_config}"
   source_hash="$(sha256sum "${source_config}" | awk '\''{print $1}'\'')"
   fail() { exit 91; }
-  sync() { :; }
+  mutation_log="${harness_root}/mutations.log"
+  : >"${mutation_log}"
+  sync() { printf "sync\n" >>"${mutation_log}"; }
   perimeter_dockerd_validate() { :; }
   chown() { :; }
   stat() {
@@ -510,8 +512,8 @@ bash -c '
       *) return 1 ;;
     esac
   }
-  mv() { command mv -- "$3" "$4"; }
-  unlink() { command rm -f -- "$2"; }
+  mv() { printf "mv\n" >>"${mutation_log}"; command mv -- "$3" "$4"; }
+  unlink() { printf "unlink\n" >>"${mutation_log}"; command rm -f -- "$2"; }
 
   write_marker_candidate() {
     local destination=$1
@@ -529,12 +531,33 @@ bash -c '
       "${release_id}" "${source_hash}" >"${recovery_marker_next}"
   }
 
+  assert_candidate_dry_run() {
+    local expected_phase=$1
+    local main_before=absent next_before marker_status=0
+    if [[ -f "${recovery_marker}" ]]; then
+      main_before="$(sha256sum "${recovery_marker}")" || exit 1
+    fi
+    next_before="$(sha256sum "${recovery_marker_next}")" || exit 1
+    : >"${mutation_log}"
+    apply=false
+    load_recovery_marker || marker_status=$?
+    [[ "${marker_status}" == 12 && "${marker_phase}" == "${expected_phase}" && \
+      ! -s "${mutation_log}" && -f "${recovery_marker_next}" ]] || exit 1
+    [[ "$(sha256sum "${recovery_marker_next}")" == "${next_before}" ]] || exit 1
+    if [[ "${main_before}" == absent ]]; then
+      [[ ! -e "${recovery_marker}" ]] || exit 1
+    else
+      [[ "$(sha256sum "${recovery_marker}")" == "${main_before}" ]] || exit 1
+    fi
+  }
+
   write_partial_marker
   if read_recovery_marker_path "${recovery_marker_next}" >/dev/null 2>&1; then exit 1; fi
+  : >"${mutation_log}"
   marker_status=0
   load_recovery_marker || marker_status=$?
   [[ "${marker_status}" == 11 && -f "${recovery_marker_next}" && \
-    ! -e "${recovery_marker}" ]]
+    ! -e "${recovery_marker}" && ! -s "${mutation_log}" ]]
   apply=true
   marker_status=0
   load_recovery_marker || marker_status=$?
@@ -547,10 +570,12 @@ bash -c '
     "${marker_phase}" == install ]]
 
   write_partial_marker
+  : >"${mutation_log}"
   marker_status=0
   load_recovery_marker || marker_status=$?
   [[ "${marker_status}" == 0 && -f "${recovery_marker}" && \
-    -f "${recovery_marker_next}" && "${marker_phase}" == install ]]
+    -f "${recovery_marker_next}" && "${marker_phase}" == install && \
+    ! -s "${mutation_log}" ]]
   apply=true
   marker_status=0
   load_recovery_marker || marker_status=$?
@@ -559,20 +584,36 @@ bash -c '
   apply=false
 
   write_marker_candidate "${recovery_marker_next}" install
+  assert_candidate_dry_run install
+  apply=true
   marker_status=0
   load_recovery_marker || marker_status=$?
   [[ "${marker_status}" == 0 && ! -e "${recovery_marker_next}" && \
     "${marker_phase}" == install ]]
+  apply=false
+
+  write_marker_candidate "${recovery_marker_next}" rollback
+  assert_candidate_dry_run rollback
+  apply=true
+  marker_status=0
+  load_recovery_marker || marker_status=$?
+  [[ "${marker_status}" == 0 && ! -e "${recovery_marker_next}" && \
+    "${marker_phase}" == rollback ]]
+  grep -Fxq "phase rollback" "${recovery_marker}"
+  apply=false
 
   persist_recovery_phase rollback
   [[ "${marker_phase}" == rollback && ! -e "${recovery_marker_next}" ]]
   grep -Fxq "phase rollback" "${recovery_marker}"
 
   write_marker_candidate "${recovery_marker_next}" rollback
+  assert_candidate_dry_run rollback
+  apply=true
   marker_status=0
   load_recovery_marker || marker_status=$?
   [[ "${marker_status}" == 0 && ! -e "${recovery_marker_next}" && \
     "${marker_phase}" == rollback ]]
+  apply=false
 
   write_marker_candidate "${recovery_marker_next}" install
   if load_recovery_marker >/dev/null 2>&1; then exit 1; fi
@@ -583,10 +624,13 @@ bash -c '
   [[ ! -e "${recovery_marker}" && ! -e "${recovery_marker_next}" ]]
 
   write_marker_candidate "${recovery_marker_next}" install
+  assert_candidate_dry_run install
+  apply=true
   marker_status=0
   load_recovery_marker || marker_status=$?
   [[ "${marker_status}" == 0 && -f "${recovery_marker}" && \
     ! -e "${recovery_marker_next}" && "${marker_phase}" == install ]]
+  apply=false
   retire_recovery_marker
 
   printf "operator %s\nsource-sha256 %s\noriginal absent\nphase install\n" \
@@ -642,6 +686,33 @@ bash -c '
   "${installer_staged_discard_flow}" \
   "${installer_config_reconcile_flow}" || \
   fail 'Docker perimeter installer staged-file retry harness failed'
+
+installer_recovery_dispatch_flow="$(sed -n '/^recovery_status=0$/,/^fi$/p' \
+  "${docker_perimeter_installer}")"
+for candidate_status in 11 12; do
+  candidate_plan="$(bash -c '
+    set -Eeuo pipefail
+    apply=false
+    marker_phase=rollback
+    assert_no_other_recovery_intents() { :; }
+    pending_status=$2
+    load_recovery_marker() { return "${pending_status}"; }
+    recover_armed_perimeter() { exit 97; }
+    fail() { exit 98; }
+    eval "$1"
+    exit 99
+  ' _ "${installer_recovery_dispatch_flow}" "${candidate_status}")" || \
+    fail 'Docker perimeter candidate dry-run must exit before recovery execution'
+  if [[ "${candidate_status}" == 11 ]]; then
+    grep -Fq 'journal candidate needs cleanup.' <<<"${candidate_plan}" || \
+      fail 'Docker perimeter invalid candidate dry-run must describe cleanup'
+  else
+    grep -Fq 'journal candidate is ready to reconcile.' <<<"${candidate_plan}" || \
+      fail 'Docker perimeter valid candidate dry-run must describe reconciliation'
+    grep -Fq 'resume recovery in phase rollback.' <<<"${candidate_plan}" || \
+      fail 'Docker perimeter valid candidate dry-run must describe its target phase'
+  fi
+done
 
 installer_version_flow="$(installer_function_body version_at_least)"
 installer_minimum_engine_flow="$(installer_function_body assert_minimum_docker_engine)"
@@ -1181,7 +1252,15 @@ bash -c '
   validate_docker_socket_listener "${valid_listener}" 1009
   reverse_listener='\''u_str LISTEN 0 4096 /run/docker.sock 11937 * 0 users:(("systemd",pid=1,fd=89),("dockerd",pid=1009,fd=5))'\''
   validate_docker_socket_listener "${reverse_listener}" 1009
+  live_listener='\''u_str LISTEN 0      4096 /run/docker.sock 11937 * 0 users:(("dockerd",pid=1009,fd=5),("systemd",pid=1,fd=238))'\''
+  validate_docker_socket_listener "${live_listener}       " 1009
+  printf -v tab_listener "%s\t  " "${reverse_listener}"
+  validate_docker_socket_listener "${tab_listener}" 1009
+  printf -v multiline_listener "%s\n%s" "${valid_listener}" "${reverse_listener}"
   for unsafe_listener in \
+    "${valid_listener} unexpected" \
+    "${valid_listener} users:((\"proxy\",pid=50,fd=4))" \
+    "${multiline_listener}" \
     '\''u_str LISTEN 0 4096 /run/docker.sock 11937 * 0 users:(("dockerd",pid=2000,fd=5),("systemd",pid=1,fd=89))'\'' \
     '\''u_str LISTEN 0 4096 /run/docker.sock 11937 * 0 users:(("proxy",pid=50,fd=4),("dockerd",pid=1009,fd=5),("systemd",pid=1,fd=89))'\''; do
     if (validate_docker_socket_listener \
