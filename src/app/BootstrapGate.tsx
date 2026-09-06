@@ -26,6 +26,7 @@ type TelegramBootstrapRetryListener = (signal: TelegramBootstrapRetrySignal) => 
 interface TelegramBootstrapOptions {
   readonly platform: PlatformAdapter;
   readonly onReady: VoidFunction;
+  readonly onPendingChange?: (pending: boolean) => void;
   readonly onSynchronized?: (result: LaunchPreferenceSyncResult, signal: AbortSignal) => void;
   readonly synchronize?: typeof synchronizeLaunchPreferences;
   readonly timeoutMs?: number;
@@ -65,6 +66,7 @@ function subscribeTelegramBootstrapRetry(listener: TelegramBootstrapRetryListene
 export function startTelegramPreferenceBootstrap({
   platform,
   onReady,
+  onPendingChange,
   onSynchronized,
   synchronize = synchronizeLaunchPreferences,
   timeoutMs = BOOTSTRAP_TIMEOUT_MS,
@@ -87,6 +89,7 @@ export function startTelegramPreferenceBootstrap({
   let cancelActiveAttempt: VoidFunction | undefined;
   let boundaryController: AbortController | undefined;
   let observedFingerprint = platform.getSessionFingerprint?.();
+  let hasObservedFingerprint = observedFingerprint !== undefined;
   let idleRefreshAllowed = false;
   let retryPending = false;
   let attemptRunning = false;
@@ -134,18 +137,21 @@ export function startTelegramPreferenceBootstrap({
     if (cancelled || attemptRunning || !hasAttemptBudget(startedAt)) return;
     retryPending = false;
     attemptRunning = true;
+    onPendingChange?.(true);
     attemptStarts.push(startedAt);
     lastAttemptAt = startedAt;
     activeController?.abort();
     const controller = new AbortController();
     activeController = controller;
     observedFingerprint = platform.getSessionFingerprint?.();
+    if (observedFingerprint !== undefined) hasObservedFingerprint = true;
     const isForeground = finished;
     let settled = false;
     const settle = (retry: boolean, automaticRetry = true) => {
       if (settled) return;
       settled = true;
       attemptRunning = false;
+      if (!cancelled) onPendingChange?.(false);
       globalThis.clearTimeout(timeoutId);
       if (activeTimeoutId === timeoutId) activeTimeoutId = undefined;
       cancelActiveAttempt = undefined;
@@ -190,7 +196,9 @@ export function startTelegramPreferenceBootstrap({
         if (settled || cancelled) return;
         const message = error instanceof Error ? error.message : 'unknown bootstrap error';
         console.warn(`[telegram] preferences bootstrap failed: ${message}`);
-        settle(isRetryableBootstrapError(error));
+        const retryable = isRetryableBootstrapError(error);
+        if (!retryable) idleRefreshAllowed = false;
+        settle(retryable);
       },
     );
   };
@@ -230,7 +238,13 @@ export function startTelegramPreferenceBootstrap({
   const retryOnExternalSignal: TelegramBootstrapRetryListener = () => {
     if (cancelled) return;
     const fingerprint = platform.getSessionFingerprint?.();
-    const identityChanged = fingerprint !== observedFingerprint;
+    const identityChanged = observedFingerprint !== undefined && fingerprint !== observedFingerprint;
+    const resumeAbsentColdLaunch = !hasObservedFingerprint && fingerprint !== undefined &&
+      idleRefreshAllowed && !retryPending && !attemptRunning;
+    if (fingerprint !== undefined) hasObservedFingerprint = true;
+    // First SDK availability is not an account switch. The in-flight sync
+    // checks its own captured fingerprint and retries on the short cold ladder.
+    if (!identityChanged) observedFingerprint = fingerprint;
     if (identityChanged) {
       // Quarantine is not an HTTP retry and must never wait for its cooldown.
       // The store hides the old namespace synchronously before the first await.
@@ -251,6 +265,13 @@ export function startTelegramPreferenceBootstrap({
     if (attemptRunning) {
       externalSignalPending = true;
       return;
+    }
+    if (resumeAbsentColdLaunch) {
+      // A completed `absent` probe has no verified session to refresh. SDK
+      // availability resumes its cold ladder, not the 30-second foreground lane.
+      retryPending = true;
+      retryIndex = 0;
+      if (scheduleRetry()) return;
     }
     if (!retryPending && !idleRefreshAllowed) return;
     retryPending = true;
@@ -281,6 +302,7 @@ export function startTelegramPreferenceBootstrap({
 export function BootstrapGate({ children }: { children: ReactNode }) {
   const platform = usePlatform();
   const [ready, setReady] = useState(!platform.isTelegram);
+  const [syncPending, setSyncPending] = useState(false);
   const [manualRetry, setManualRetry] = useState(0);
   const locale = useUiStore((state) => state.locale);
   const ledgerMode = useBankStore((state) => state.ledgerMode);
@@ -292,6 +314,7 @@ export function BootstrapGate({ children }: { children: ReactNode }) {
     return startTelegramPreferenceBootstrap({
       platform,
       onReady: () => setReady(true),
+      onPendingChange: setSyncPending,
       onSynchronized: (result, signal) => {
         if (
           signal.aborted ||
@@ -320,7 +343,7 @@ export function BootstrapGate({ children }: { children: ReactNode }) {
 
   if (ready && ledgerMode !== 'read_only') return children;
 
-  if (ready) {
+  if (ready && (!syncPending || ledgerSyncError === 'server_copy_confirmation_required')) {
     const needsServerCopyConfirmation =
       ledgerSyncError === 'server_copy_confirmation_required';
     return (

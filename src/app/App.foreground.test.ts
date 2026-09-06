@@ -3,7 +3,7 @@
 import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { LaunchState, PlatformAdapter } from '@/platform/types';
+import type { BankImportRequest, BankImportResponse, LaunchState, PlatformAdapter } from '@/platform/types';
 import { markStickyServerLedgerMode } from '@/platform/ledgerAuthorityReceipt';
 import { buildSeed } from '@/domain/seed';
 import { useBankStore } from '@/store/bankStore';
@@ -15,6 +15,7 @@ const host = vi.hoisted(() => ({
   fingerprint: 'initial-session',
   telegramId: '42',
   load: vi.fn<(signal?: AbortSignal) => Promise<LaunchState | null>>(),
+  importBank: vi.fn<PlatformAdapter['importBankState']>(),
 }));
 
 vi.mock('@/platform/environment', () => ({ isTelegramMiniApp: () => true }));
@@ -24,7 +25,7 @@ vi.mock('@/platform/usePlatform', () => {
     getSessionFingerprint: () => host.fingerprint,
     getCurrentUser: () => ({ telegramId: host.telegramId, displayName: 'Ada', source: 'host' }),
     loadLaunchState: (signal) => host.load(signal),
-    importBankState: async () => { throw new Error('Unexpected server import in local bridge test'); },
+    importBankState: (request, signal) => host.importBank(request, signal),
     executeBankCommand: async () => { throw new Error('Unexpected server command in local bridge test'); },
     refreshBankRates: async () => { throw new Error('Unexpected server rates in local bridge test'); },
     haptic: () => undefined,
@@ -69,6 +70,7 @@ describe('Telegram foreground synchronization ownership', () => {
     host.fingerprint = `launch-${++attempt}`;
     host.telegramId = '42';
     host.load.mockReset().mockResolvedValue(preferences());
+    host.importBank.mockReset().mockRejectedValue(new Error('Unexpected server import in local bridge test'));
     vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
     vi.spyOn(document, 'addEventListener');
     vi.spyOn(document, 'removeEventListener');
@@ -128,6 +130,57 @@ describe('Telegram foreground synchronization ownership', () => {
   async function scheduledRetry(): Promise<void> {
     await act(async () => vi.advanceTimersByTimeAsync(1_000));
   }
+
+  it.each(['success', 'failure', 'timeout'] as const)(
+    'shows progress without a retry button during first import, then handles %s', async outcome => {
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const persisted = storage.get('cometa.bank.tma.user.42');
+      const transactions = useBankStore.getState().transactions;
+      let request: BankImportRequest | undefined;
+      let importSignal: AbortSignal | undefined;
+      let resolve!: (value: BankImportResponse) => void;
+      let reject!: (error: Error) => void;
+      const pending = new Promise<BankImportResponse>((done, fail) => { resolve = done; reject = fail; });
+      host.importBank.mockImplementationOnce((value, signal) => {
+        request = value;
+        importSignal = signal;
+        signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+        return pending;
+      });
+      host.load.mockResolvedValue({
+        ...preferences(),
+        bank: { contractVersion: 1, mode: 'import_required', telegramId: '42' },
+      });
+      await foreground();
+      expect(host.importBank).toHaveBeenCalledOnce();
+      expect(useBankStore.getState().ledgerMode).toBe('read_only');
+      expect(container.textContent).toContain('Setting up Cometa');
+      expect(container.textContent).not.toContain('could not sync');
+      expect(container.querySelector('button')).toBeNull();
+      expect(importSignal?.aborted).toBe(false);
+      expect(storage.get('cometa.bank.tma.user.42')).toBe(persisted);
+      if (outcome === 'success') {
+        if (request === undefined) throw new Error('Expected the import snapshot');
+        const response: BankImportResponse = {
+          version: 1, mode: 'server', imported: true, telegramId: '42',
+          revisionEpoch: 'b'.repeat(32), revision: 1, digest: 'c'.repeat(64),
+          warnings: [], state: request.state,
+        };
+        await act(async () => resolve(response));
+        expect(container.querySelector('main h1')?.textContent).toBe('Cometa');
+        expect(useBankStore.getState().ledgerMode).toBe('server');
+      } else {
+        if (outcome === 'failure') await act(async () => reject(new TypeError('Import connection failed')));
+        else await act(async () => vi.advanceTimersByTimeAsync(4_500));
+        expect(container.textContent).toContain('Cometa could not sync safely');
+        expect(container.querySelector('button')?.textContent).toBe('Try again');
+        expect(useBankStore.getState().ledgerMode).toBe('read_only');
+        expect(storage.get('cometa.bank.tma.user.42')).toBe(persisted);
+      }
+      expect(useBankStore.getState().transactions).toEqual(transactions);
+    },
+  );
 
   it('coalesces foreground churn during an unfinished cold bootstrap into one request', async () => {
     await act(async () => root?.unmount());

@@ -29,6 +29,166 @@ afterEach(() => {
 });
 
 describe('startTelegramPreferenceBootstrap', () => {
+  it('adopts the first late fingerprint without aborting cold bootstrap or imposing foreground cooldown', async () => {
+    vi.useFakeTimers();
+    let fingerprint: string | undefined = undefined;
+    let retryOnSignal: ((signal: 'online' | 'visible') => void) | undefined;
+    let resolveFirst: ((result: 'retry') => void) | undefined;
+    let firstSignal: AbortSignal | undefined;
+    const onReady = vi.fn();
+    const synchronize = vi.fn()
+      .mockImplementationOnce((_platform: PlatformAdapter, signal: AbortSignal) => {
+        firstSignal = signal;
+        return new Promise<'retry'>(resolve => { resolveFirst = resolve; });
+      })
+      .mockResolvedValueOnce('applied');
+    const cleanup = startTelegramPreferenceBootstrap({
+      platform: { ...telegramPlatform(), getSessionFingerprint: () => fingerprint },
+      onReady, synchronize,
+      subscribeRetry: listener => { retryOnSignal = listener; return () => undefined; },
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    fingerprint = 'first-available-session';
+    retryOnSignal?.('visible');
+    expect(firstSignal?.aborted).toBe(false);
+    resolveFirst?.('retry');
+    await vi.advanceTimersByTimeAsync(999);
+    expect(synchronize).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(synchronize).toHaveBeenCalledTimes(2);
+    expect(onReady).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
+  it('stops foreground retries after a terminal error following success but allows a new identity', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    let fingerprint = 'verified-first-session';
+    let retryOnSignal: ((signal: 'online' | 'visible') => void) | undefined;
+    const synchronize = vi.fn().mockResolvedValueOnce('current')
+      .mockRejectedValueOnce(Object.assign(new Error('unsupported contract'), { retryable: false }))
+      .mockResolvedValue('applied');
+    const pending = vi.fn();
+    const cleanup = startTelegramPreferenceBootstrap({
+      platform: { ...telegramPlatform(), getSessionFingerprint: () => fingerprint },
+      onReady: () => undefined, onPendingChange: pending, synchronize, externalRetryCooldownMs: 10,
+      subscribeRetry: listener => { retryOnSignal = listener; return () => undefined; },
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    retryOnSignal?.('visible');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(synchronize).toHaveBeenCalledTimes(2);
+    expect(pending.mock.calls).toEqual([[true], [false], [true], [false]]);
+    for (let edge = 0; edge < 5; edge += 1) {
+      await vi.advanceTimersByTimeAsync(10);
+      retryOnSignal?.('online');
+      retryOnSignal?.('visible');
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(synchronize).toHaveBeenCalledTimes(2);
+    fingerprint = 'verified-next-session';
+    retryOnSignal?.('visible');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(synchronize).toHaveBeenCalledTimes(3);
+    cleanup();
+  });
+
+  it('retries a completed absent cold launch on the short ladder when its first fingerprint appears', async () => {
+    vi.useFakeTimers();
+    let fingerprint: string | undefined = undefined;
+    let retryOnSignal: ((signal: 'online' | 'visible') => void) | undefined;
+    const synchronize = vi.fn().mockResolvedValueOnce('absent').mockResolvedValue('applied');
+    const cleanup = startTelegramPreferenceBootstrap({
+      platform: { ...telegramPlatform(), getSessionFingerprint: () => fingerprint },
+      onReady: () => undefined, synchronize,
+      subscribeRetry: listener => { retryOnSignal = listener; return () => undefined; },
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    fingerprint = 'first-available-after-null';
+    retryOnSignal?.('visible');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(synchronize).toHaveBeenCalledTimes(2);
+    cleanup();
+  });
+
+  it('keeps cooldown when a previously observed session disappears and returns after an absent probe', async () => {
+    vi.useFakeTimers();
+    let fingerprint: string | undefined = 'original-session';
+    let retryOnSignal: ((signal: 'online' | 'visible') => void) | undefined;
+    const synchronize = vi.fn().mockResolvedValueOnce('current')
+      .mockResolvedValueOnce('absent').mockResolvedValue('applied');
+    const cleanup = startTelegramPreferenceBootstrap({
+      platform: { ...telegramPlatform(), getSessionFingerprint: () => fingerprint },
+      onReady: () => undefined, synchronize, externalRetryCooldownMs: 10, retryDelaysMs: [1],
+      subscribeRetry: listener => { retryOnSignal = listener; return () => undefined; },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    fingerprint = undefined;
+    retryOnSignal?.('visible');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(synchronize).toHaveBeenCalledTimes(2);
+    fingerprint = 'returning-session';
+    retryOnSignal?.('visible');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(synchronize).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(9);
+    expect(synchronize).toHaveBeenCalledTimes(3);
+    cleanup();
+  });
+
+  it('publishes pending for success timeout and identity cancellation but never after cleanup', async () => {
+    vi.useFakeTimers();
+    let fingerprint = 'first-session';
+    let retryOnSignal: ((signal: 'online' | 'visible') => void) | undefined;
+    let resolveLast: ((result: 'applied') => void) | undefined;
+    const pending = vi.fn();
+    const synchronize = vi.fn().mockResolvedValueOnce('current')
+      .mockImplementation(() => new Promise<'applied'>(resolve => { resolveLast = resolve; }));
+    const cleanup = startTelegramPreferenceBootstrap({
+      platform: { ...telegramPlatform(), getSessionFingerprint: () => fingerprint },
+      onReady: () => undefined, onPendingChange: pending, synchronize,
+      attemptTimeoutMs: 20, retryDelaysMs: [1], externalRetryCooldownMs: 10,
+      subscribeRetry: listener => { retryOnSignal = listener; return () => undefined; },
+    });
+    expect(pending.mock.calls).toEqual([[true]]);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(pending.mock.calls).toEqual([[true], [false]]);
+    retryOnSignal?.('visible');
+    expect(pending.mock.calls).toEqual([[true], [false], [true]]);
+    await vi.advanceTimersByTimeAsync(20);
+    expect(pending.mock.calls).toEqual([[true], [false], [true], [false]]);
+    await vi.advanceTimersByTimeAsync(1);
+    fingerprint = 'next-session';
+    retryOnSignal?.('visible');
+    expect(pending.mock.calls).toEqual([[true], [false], [true], [false], [true], [false]]);
+    cleanup();
+    resolveLast?.('applied');
+    retryOnSignal?.('visible');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(pending).toHaveBeenCalledTimes(6);
+  });
+
+  it('does not publish pending after cleanup aborts an active attempt', async () => {
+    vi.useFakeTimers();
+    let signal: AbortSignal | undefined;
+    let resolve: ((result: 'applied') => void) | undefined;
+    const pending = vi.fn();
+    const cleanup = startTelegramPreferenceBootstrap({
+      platform: telegramPlatform(), onReady: () => undefined, onPendingChange: pending,
+      synchronize: (_platform, attemptSignal) => {
+        signal = attemptSignal;
+        return new Promise<'applied'>(done => { resolve = done; });
+      },
+    });
+    expect(pending.mock.calls).toEqual([[true]]);
+    cleanup();
+    expect(signal?.aborted).toBe(true);
+    resolve?.('applied');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(pending.mock.calls).toEqual([[true]]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('meters successful foreground refreshes under the same rolling budget as cold bootstrap', async () => {
     vi.useFakeTimers();
     const onReady = vi.fn();
