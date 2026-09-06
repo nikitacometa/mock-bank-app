@@ -1665,7 +1665,7 @@ prepare_ledger_mode_backup() {
   (
     local -r current_release=$1
     local -r previous_release=$2
-    local timestamp backup_path backup_quick_check backup_mode compat_copy=''
+    local timestamp backup_path backup_quick_check backup_mode compat_journal_mode compat_copy=''
     local compat_cleanup=''
 
     [[ -d "${database_backup_root}" && ! -L "${database_backup_root}" ]] || \
@@ -1698,6 +1698,12 @@ prepare_ledger_mode_backup() {
     trap "${compat_cleanup}" EXIT
     install -m 0600 -- "${backup_path}" "${compat_copy}" || \
       fail 'cannot create the ledger-mode compatibility copy'
+    # A single-file read-only mount cannot create WAL sidecars. Normalize only
+    # this disposable copy; preserve the live database and durable backup.
+    compat_journal_mode="$(sqlite3 -batch -bail -noheader "${compat_copy}" 'PRAGMA journal_mode=DELETE;')" || \
+      fail 'cannot normalize the ledger-mode compatibility copy journal'
+    [[ "${compat_journal_mode}" == 'delete' ]] || \
+      fail 'ledger-mode compatibility copy must use DELETE journal mode'
     chown -- "+${bot_uid}:+${bot_uid}" "${compat_copy}" || \
       fail 'cannot assign the ledger-mode compatibility copy'
     verify_local_authority_backup_with_image "${current_release}" "${compat_copy}" || \

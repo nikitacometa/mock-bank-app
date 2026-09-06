@@ -6,9 +6,20 @@ Checksums/source parity, strict preflights и оба `prepare --repair-bot` пр
 health/TLS/API gates стабильны. Web и bot healthy, zero restarts, `bot_polling_ready`, повторных
 profile `429` нет. Full status и ledger status exit 0: `/private/tmp/cometa-104102-live-status.log`.
 Mode остаётся LOCAL, owner canonical imports 0; mutating bank chat flows ещё не включены.
+Попытка `ledger-mode server --apply` в `14:37:32Z` остановилась до mode switch/restart: read-only
+single-file WAL backup не может создать SQLite sidecars (code 14). Root `0600` backup сохранён:
+`/srv/cometa-bank/backups/20260906T143732Z-before-ledger-mode-server.sqlite`, `quick_check=ok`, LOCAL.
+Новый uncommitted fix нормализует только disposable `.compat` в DELETE, не live DB/retained backup.
+815 tests и compiling mutant red/restored green; exact read-only Docker probes на обоих existing
+images прошли с normalized synthetic copy, original unchanged. Владелец явно разрешил текущий
+WAL-fix без Opus; это отдельный narrow waiver, не перенос прежнего `774f0ae` exception.
+Retry `/private/tmp/claude-paired-review-wal-backup-retry-20260906/attempt.md` не дал report и
+остановлен оператором после 10 минут: не clean и не повторно подтверждённая org access error.
+Текущий fix разрешён к normal immutable deploy без нового Opus attempt; завершение deploy/server
+activation пока не подтверждено, последний проверенный mode LOCAL.
 Final `pnpm verify` повторно прошёл 815 tests, lint/deploy guards/build в `13:01Z`.
-Combined Opus review не выполнен: организация
-отключила Claude Code access. Владелец явно waived missing review только для emergency recovery
+Ранее combined Opus review recovery не выполнился из-за отключённого организацией Claude Code
+access. Тогда владелец явно waived missing review только для emergency recovery
 source `774f0ae`; это закрывает только его deploy gate, не означает clean review или общий waiver.
 Предыдущие B `095602` activation и unhealthy rollback A `095601` из-за `setMyName 429` — история
 incident, устранённого profile read-before-write и guarded recovery.
@@ -43,8 +54,10 @@ owner snapshots сохранены: Nikita — все 438 rows без измен
 interest settlement. Это два проверяемых собственных Telegram Old профиля; их не следует
 отождествлять с John Cometa по одному display name.
 
-В `13:03:18Z` оба Telegram Old snapshots по 438 rows сохранили hashes и прежний compiled marker
-`071101`, imports 0. Desktop coordinate/AX ошибки остаются ограничением native automation.
+В `14:36:25Z` оба Telegram Old profiles получили compiled `104102`; read-only parity в `14:56:22Z`
+подтвердила все 438 rows и прежние transaction/balance hashes у каждого, LOCAL, canonical false,
+imports 0. Владелец явно waived remaining manual native button/foreground acceptance; это не tested
+pass. Desktop coordinate/AX ошибки остаются ограничением native automation.
 По явной просьбе владельца открыт отдельный headed Chrome с fresh profile
 `/private/tmp/cometa-telegram-web-qa.Mtuner/profile`; владелец вошёл через QR. Реальный Telegram Web
 John Cometa прошёл English → KZT → Cometa is ready → Open Cometa → Telegram open-page consent →
@@ -52,7 +65,8 @@ embedded Mini App. Web namespace hash `b8c452f98d` отличается от Old
 `a98ab714e4`: не отождествлять эти namespace по display name. В Web compiled
 `104102`, 437 rows, 4 accounts; reset/mutations не выполнялись. Browser plugin по-прежнему без
 bindings; Playwright использует только отдельный owner-authorized profile. Focused John Web QA
-пройден, включая foreground/reopen; Old final-build, phone и server-mode gates остаются открытыми.
+пройден, включая foreground/reopen; Old final-build marker/parity gate пройден. Phone и server-mode
+gates не закрыты; manual native button/foreground scope waived владельцем, не протестирован.
 В `12:58Z` John Web: поиск ChatGPT дал 9 результатов, включая original Pending; Received filter —
 0. RU→English и primary KZT→USD→KZT пройдены; currency меняла только total display. Точные hashes
 437 transactions и accounts не изменились, marker `104102`. KZT transfer `700000` заблокирован
@@ -398,8 +412,8 @@ Telegram Android/iOS acceptance.
   health/TLS/API stable, zero restarts, `bot_polling_ready`, no repeated profile `429`.
   Root-only same-VPS WAL-safe backups: `20260906T122958Z-before-20260906T104101Z.sqlite` и
   `20260906T123205Z-before-20260906T104102Z.sqlite` в `/srv/cometa-bank/backups`.
-- В `13:03:18Z` authority LOCAL, imports 0; оба Old snapshots по 438 rows сохранили hashes и
-  compiled marker `071101`. Web John Cometa отдельно загрузил `104102`, 437 rows, 4 accounts.
+- В `14:56:22Z` authority LOCAL, imports 0; оба Old snapshots по 438 rows сохранили hashes и
+  compiled marker `104102`. Web John Cometa отдельно загрузил `104102`, 437 rows, 4 accounts.
 - В `10:05Z` повторены 9 signed checks, PASS, и подтверждены прежние точные hashes двух native
   438-row snapshots. В `10:08Z` live health повторно healthy, authority LOCAL, canonical imports 0.
 - Native inline coordinate clicks в Old и основном Telegram.app блокируются `-10005`; основной
@@ -637,16 +651,19 @@ Telegram Android/iOS acceptance.
 ## Открытые gates
 
 1. Recovery deploy завершён и не требует повторения. Узкий owner waiver покрывает только missing
-   Opus review emergency source `774f0ae`; organization access всё ещё отключён, clean не заявлен.
+   Opus review emergency source `774f0ae`; тот review не выполнен, clean не заявлен.
    Не переносить waiver на будущие changes и не открывать дополнительный improvement/review cycle.
-2. Focused John Web QA завершён: реальный onboarding, foreground draft/native controls, `/help`
-   и повторный launch пройдены с неизменными ledger/account hashes. Отдельно повторить
-   final-build release-marker/preservation и native controls checks Old Nikita и
-   MetaFlexer: их 438-row snapshots пока имеют прежний marker `071101`. Не считать John одним из
-   этих профилей. Owner разрешил эти QA действия; unrelated external actions не разрешены.
+2. Focused John Web QA завершён; оба Old profiles имеют final-build marker `104102` и неизменные
+   438-row snapshots. Remaining manual native button/foreground acceptance waived владельцем,
+   не tested pass. Namespace John не отождествлять с Old по display name.
    Native desktop automation ограничена `-10005`/`AXError.notImplemented`; browser-plugin binding
    отсутствует, но owner-authorized isolated Playwright Web session уже работает.
-3. Только после исправления и real-profile retest выполнить one-way `ledger-mode server --apply`,
+3. Владелец явно waived Opus для текущего WAL `.compat` fix. Выпустить именно этот tested fix
+   через normal immutable lifecycle, без нового Opus attempt, затем повторить one-way switch.
+   Это отдельный waiver; прежний `774f0ae` scope не расширяется. Retry остановлен оператором после
+   10 минут без report, не clean и не подтверждение новой org error. Предыдущий switch в `14:37:32Z`
+   завершился code 14 до mode/restart; durable backup сохранён, последний mode LOCAL/imports 0.
+   После verified deploy выполнить one-way switch,
    импортировать по одному canonical snapshot на профиль и пройти изолированные RU/EN journeys:
    manual income/expense, recurrence с backfill/no-overdraft, add/adjust/close/restore и
    current→previous→current continuity. Не reseed existing snapshots ради валюты сценария и не

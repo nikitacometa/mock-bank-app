@@ -8,15 +8,25 @@ repeated profile `429`. Full and ledger status exited 0; evidence:
 `/private/tmp/cometa-104102-live-status.log`. Mode remains LOCAL with zero owner canonical imports;
 expanded bank chat flows are not active. Final `pnpm verify` passed again at `13:01Z`: 815 tests,
 lint/deploy guards/build.
-Combined Opus review remains unavailable because the organization disabled Claude Code access;
-there is no accepted report. The owner explicitly waived missing review only for emergency recovery
+Server activation attempted at `14:37:32Z` but failed code 14 before mode switch or restart: the
+read-only single-file WAL backup could not create SQLite sidecars. DB remains LOCAL, imports 0.
+The uncommitted operator/regression fix normalizes only disposable `.compat` to DELETE; live DB
+and durable backup are untouched. Its 815 tests, compiling mutant and exact read-only Docker probes
+on both existing images pass. The owner explicitly waived Opus for this existing WAL fix and
+authorized scoped completion, separately from `774f0ae`. Its retry produced no report and was
+operator-stopped after ten minutes: not clean or a reconfirmed org-access error. Normal immutable
+deploy is authorized without another Opus attempt; deploy/server activation are not yet verified.
+The earlier recovery review failed because the organization disabled Claude Code access;
+there was no accepted report. The owner then explicitly waived missing review only for emergency recovery
 source `774f0ae`. That narrow waiver closes its deploy gate, not a clean-review or future-change gate.
 Real isolated Telegram Web John Cometa onboarding reached embedded Mini App on `104102`, with
 437 rows/four accounts and no reset/mutation. Its namespace is distinct from both Old owner
-profiles, whose 438-row hashes and marker `071101` were unchanged at `13:03:18Z`. Distinct John Web
+profiles, which reached marker `104102` at `14:36:25Z`; parity at `14:56:22Z` reconfirmed unchanged
+438-row transaction/balance hashes, LOCAL, canonical false and imports 0. Distinct John Web
 QA is complete, including foreground/native controls and fresh `/help` reopen; final `13:03:48Z`
-bank proof preserved exact hashes and LOCAL state. Old final-build, phone and server-mode gates
-remain open. Revision 33 records the recovery and focused Web acceptance.
+bank proof preserved exact hashes and LOCAL state. Old final-build marker/parity passed; remaining
+manual native button/foreground acceptance was owner-waived, not tested. Phone, server activation,
+mutation isolation/rollback and real bot mutation captures remain open. Revision 33 records this state.
 
 Frozen runtime candidate `2897de5` passed `pnpm verify` at `09:55Z`: 799 tests (577 web + 222 bot).
 Opus v19 returned two P3 findings, not clean: the terminal-cold retry defect is fixed and the
@@ -185,8 +195,9 @@ Nikita and MetaFlexer, persisted B's compiled marker; Nikita's 438 rows remained
 MetaFlexer's 437 gained only one interest row. Neither profile was identified as John Cometa.
 Recovery is verified under the explicit owner waiver limited to source `774f0ae`; no broader review
 exception exists. Distinct John Web QA passed foreground/reopen with exact state preservation.
-Continue Old-profile final-build/native-control and snapshot-preservation retests, then the one-way
-server switch and first imports. Mutation
+Old final-build marker/parity passed, and the owner waived remaining manual native button/foreground
+acceptance without a tested-pass claim. The owner separately authorized the existing `.compat` WAL
+fix without Opus; proceed through normal immutable deploy, then retry server switch and imports. Mutation
 journeys, rollback persistence and accepted live captures follow. Chromium with synthetic Telegram
 transport does not substitute for native Telegram or Android/iOS acceptance.
 
@@ -655,12 +666,12 @@ exists.
 | M0 — baseline + design | Time-safe rate fixture, code audit, design and adversarial revision | Full baseline green; revised plan approved | `pnpm verify`, `git diff --check` | Нет | done |
 | M1 — domain v5 + templates | Account/card lifecycle reasons, `demoBaseCurrency`, `fixtureId`, manual/adjustment transitions, safe recurring materializer, v4→v5 migration, eight seeds | KZT 436→437 lifecycle preserved; synthetic fixtures do not encode statement rows; pinned parity holds; savings/date/capacity contracts hold | Domain/persistence tests, named mutants, full verify | None | deployed in A/B; preservation checks passed |
 | M2 — authority core | Shared bot bundle, additive SQLite tables, strict import, hashed idempotency, monotonic epoch/revision, signed bank API | Create-if-absent import preserves v4; atomic per-user commands; retry/collision/limit/restore cases typed; old DB opens | Repository/HTTP tests, migration/fallback harness, Opus money/concurrency review | Images only; service flag local | deployed in A/B; server mode and imports disabled |
-| M3 — TMA sync | Platform command seam, sticky server receipt, ordered canonical adoption, foreground sync, web remains local | No local fallback after authority; stale response rejected; two IDs isolated; conflicting second-device import fails closed | Store/adapter tests, two-context Playwright TMA emulation, mutants | Reviewed frontend release before authority | recovered B104102/A104101 source774f0ae under narrow owner waiver; 815 tests/CI/health green; John Web onboarding/foreground/reopen/state preservation passed; Old final-build gate pending, authority local |
+| M3 — TMA sync | Platform command seam, sticky server receipt, ordered canonical adoption, foreground sync, web remains local | No local fallback after authority; stale response rejected; two IDs isolated; conflicting second-device import fails closed | Store/adapter tests, two-context Playwright TMA emulation, mutants | Reviewed frontend release before authority | B104102/A104101 healthy; John Web QA and both Old104102/438-row parity passed; manual native remainder owner-waived, not tested; authority local |
 | M4 — transaction + recurrence bot UX | `/add`, `/recurring`, durable wizard, year/month/day backfill, typed outbox, RU/EN copy | Checking income/expense/date/monthly/backfill/pause/resume/cancel work across restart and retry; expense never overdraws or partially backfills | Bot behavior tests, parser/balance boundaries, stale/foreign callbacks, two-user tests | One-way server switch after M3 retest | deployed but disabled by local mode; live mutation QA pending |
 | M5 — accounts bot UX | `/accounts`, add, adjust, close/restore, client UI reconciliation | Zero-balance close invariant, history retained, manual freeze/pause preserved, savings settles before current adjustment | Domain/bot/UI tests, one-account and closed states, Opus focused review | One-way server switch after M3 retest | deployed but disabled by local mode; live mutation QA pending |
-| M6 — product polish | History effective dates/notes, immutable warning context, backend-only FX, operation-cap recovery and responsive QA | RU/EN readable at 320×568/390×844; no blocked bootstrap/materialization at capacity; full local journeys pass | Playwright, accessibility/overflow, `pnpm verify`, final paired review | Reviewed frontend release before native retest | frontend/browser evidence preserved; public visuals51a2eb0, 815 tests/CI green; recovery and distinct John Web QA complete; Old final-build/phone acceptance pending |
+| M6 — product polish | History effective dates/notes, immutable warning context, backend-only FX, operation-cap recovery and responsive QA | RU/EN readable at 320×568/390×844; no blocked bootstrap/materialization at capacity; full local journeys pass | Playwright, accessibility/overflow, `pnpm verify`, final paired review | Reviewed frontend release before native retest | public illustrative visuals51a2eb0, 815 tests/CI green; John Web QA and Old final-build parity complete; manual native remainder waived, phone gate pending |
 | M7 — bridge release | Prepare two source-identical A/B releases; install the exact Docker daemon perimeter; harden the legacy Caddy/Nginx edge; keep authority local | Docker 28+ uses only systemd `-H fd://` and canonical daemon JSON; Caddy owns public TLS plus a `0200` Unix admin socket with persistence off, verified inner TLS and host-wide `h1/h2`; exact loopback runtime, trusted real IP and quiesced renewal hold; current/previous become source-clean | Installer dry/apply with controlled restart and durable recovery; transactional `harden-edge` dry/apply through current admin endpoint; strict A/B preflight/prepare/activate; inner/outer smoke; pinned A operator on legacy fallback | Owner-authorized deployment; recovery/failure harnesses; two consecutive activations; no ledger import | recovered: B104102 current/A104101 previous, both774f0ae; 31s health/TLS/API, zero restarts/polling ready; narrow owner review waiver, ledger local |
-| M8 — live acceptance + showcase | Switch service flag, import both preserved owner profiles, current→previous→current mutation probe, RU/EN chat journeys, three real captures | Profiles stay isolated and survive restart/rollback; web demo unaffected; README has exactly three equal sanitized Telegram images in one row | `pnpm verify`, live API/TLS, Telegram Old Computer Use, owner Android/iOS gate, screenshot guard | Reviewed foreground fix and real-profile retest before server switch/import | both B markers and baseline preservation verified; server/native mutation acceptance pending |
+| M8 — live acceptance + showcase | Switch service flag, import both preserved owner profiles, current→previous→current mutation probe, RU/EN chat journeys, three real captures | Profiles stay isolated and survive restart/rollback; web demo unaffected; README has exactly three equal sanitized Telegram images in one row | `pnpm verify`, live API/TLS, Telegram Old Computer Use, owner Android/iOS gate, screenshot guard | Reviewed foreground fix and real-profile retest before server switch/import | both104102 markers/parity verified; code14 .compat fix has separate explicit owner Opus waiver; normal immutable deploy/server switch and imports/mutations/real captures pending |
 
 Sensitive milestones M1–M5 receive an independent money/concurrency review immediately after focused
 tests. Final diff receives Codex review plus read-only Claude Opus 5 xhigh; every concrete finding is
@@ -1272,9 +1283,10 @@ Root-only same-VPS WAL-safe backups under `/srv/cometa-bank/backups` are
 `20260906T123205Z-before-20260906T104102Z.sqlite`. Actual `ssh -G irena` resolves user `irena`,
 uid/gid `1001`; use the live alias, not the old `metaflexer` login.
 
-At `13:03:18Z`, both Old owner snapshots retained all 438 rows, unchanged hashes and marker
-`071101`; authority was LOCAL with zero owner canonical imports. Their latest-build retest is
-still pending. No data-reset/import workaround was used; expanded bank chat flows remain disabled.
+At `14:36:25Z`, both Old owner profiles reached marker `104102`; read-only parity at `14:56:22Z`
+reconfirmed all 438 rows and unchanged transaction/balance hashes, LOCAL, canonical false and zero
+imports. The owner explicitly waived remaining manual native button/foreground acceptance; this
+is not a tested pass. No data-reset/import workaround was used; expanded bank chat flows stay disabled.
 
 Showcase visuals are already public in `51a2eb0`: actual web captures and an explicitly illustrative
 Telegram preview, not native acceptance captures. The latest Linux CI is the passing `774f0ae`
@@ -1308,6 +1320,25 @@ correct four LOCAL commands; its new Open Cometa button reopened the embedded ap
 Final private `bank-proof.js` at `13:03:48Z` asserted the same exact transaction/account hashes
 above: 437 rows/four accounts, primary restored to KZT, English, compiled `104102`, LOCAL. No money
 mutation or submit occurred. Private captures `john-home.png` and `john-reopened.png` are in the
-isolated QA directory. Distinct John Web focused QA is complete. Old two-profile final-build/native
-controls, phone acceptance, server activation/import, mutation journeys/isolation and rollback
-persistence remain pending; this pass does not close those gates.
+isolated QA directory. Distinct John Web focused QA and Old final-build marker/parity are complete;
+manual native button/foreground remainder is owner-waived, not tested. Phone acceptance, server
+activation/import, real John bot mutation captures, two-real-profile server isolation and rollback
+persistence remain pending. Illustrative Telegram visuals remain labelled as previews.
+
+The `14:37:32Z` `ledger-mode server --apply` attempt failed before mode switch/restart: a read-only
+single-file mounted WAL backup could not create SQLite sidecars (code 14). Root-owned `0600`
+`/srv/cometa-bank/backups/20260906T143732Z-before-ledger-mode-server.sqlite` is retained,
+`quick_check=ok`, LOCAL. The new uncommitted change is limited to `release.sh` and its regression
+script: normalize disposable `.compat` to DELETE, never the live DB or durable backup. The 815-test
+gate passed; the compiling mutant failed and restored source passed. Exact read-only Docker probes
+on both existing production images passed with a normalized synthetic copy; the original remained
+unchanged. Application/runtime source matches live `774f0ae` (`git diff --quiet` on src/bot/public,
+package/lock, Vite/TypeScript configs and index.html exited 0); only operator/test code changed.
+Optional private evidence: `/private/tmp/cometa-ledger-wal-normalization-{focused,mutant,verify}.log`.
+The owner explicitly waived independent Opus for this existing WAL fix and authorized scoped
+completion; that is separate from the earlier `774f0ae` recovery waiver, not an automatic transfer.
+Retry evidence `/private/tmp/claude-paired-review-wal-backup-retry-20260906/attempt.md` records no
+report and operator cancellation after ten minutes. It is not clean review, a provider-error verdict
+or reconfirmation of the prior organization-access error. Proceed with the normal immutable deploy
+without another Opus attempt. Deploy/server activation are not yet verified complete; the last
+verified current104102/previous104101 are healthy and DB remains LOCAL.

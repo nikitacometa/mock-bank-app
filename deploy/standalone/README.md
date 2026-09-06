@@ -42,9 +42,35 @@ runner exited without an accepted report. Evidence:
 `/private/tmp/claude-paired-review-recovery-20260906/raw.json`. The exception covers
 only the `774f0ae` recovery deployment, not later changes or authority activation.
 
-Ledger mode remains `local`. Read-only parity at `12:33:41Z` confirms both existing
-profiles retain their exact 438-row histories and balances, compiled marker `071101`,
-and zero canonical imports. Do not reset or replace them with a fresh browser fixture.
+Ledger mode remains `local`. Read-only parity at `14:36:25Z` confirms both existing
+Old profiles now retain compiled marker `104102`, their exact 438-row histories
+and balances, and zero canonical imports. The owner accepted the outstanding
+manual native-control/foreground check as an assumption, not a tested pass.
+Do not reset or replace either original snapshot with a fresh browser fixture.
+
+The owner authorized server activation, but `ledger-mode server --apply` at
+`14:37:32Z` failed **before the mode switch or bot restart**. The durable backup
+`backups/20260906T143732Z-before-ledger-mode-server.sqlite` is retained, root-owned
+at mode `0600`, with `quick_check=ok` and mode `local`. Its WAL header prevents
+the single-file, read-only container probe from opening the backup without WAL
+sidecars (`SQLITE_CANTOPEN`, code 14).
+
+A local, not-yet-deployed fix converts only the disposable `.compat` copy to
+`DELETE` journal mode before both image probes. Live SQLite and the durable
+backup remain WAL; all container read-only restrictions remain intact. The full
+815-test gate passes, including a real-SQLite regression and conversion-failure
+cases. Removing the conversion reproduces code 14; restoring it passes. A
+synthetic copy also passed the exact read-only probe through both current
+production images, with its original unchanged. Logs:
+`/private/tmp/cometa-ledger-wal-normalization-{focused,mutant,verify}.log`.
+The owner explicitly waived independent Opus review for this existing WAL operator
+fix and authorized scoped completion. This is a separate exception from the earlier
+`774f0ae` recovery waiver. The retry recorded in
+`/private/tmp/claude-paired-review-wal-backup-retry-20260906/attempt.md` produced no
+report and was stopped by the operator after ten minutes; it was not clean and did
+not reconfirm the prior organization-access error. Proceed through the normal
+immutable release lifecycle without another Opus attempt. Fix deployment and server
+activation are not yet verified complete.
 
 The owner logged into an explicitly requested, separate headed Chrome profile.
 Real Telegram Web passed English → KZT → ready card → Open Cometa → embedded
@@ -57,8 +83,8 @@ display-only KZT → USD → KZT, overdraft prevention, draft-preserving foregro
 native Back/Main controls, `/help` and close/reopen from the new bot reply.
 At `13:03:48Z`, all 437 transaction and four-account hashes still matched the
 pre-test baseline; English/KZT and compiled `104102` were retained. No transfer
-was submitted. The two Old 438-row snapshots remained unchanged at `13:03:18Z`,
-with compiled `071101` and no canonical imports.
+was submitted. The later `14:36:25Z` parity check above supersedes the Old clients'
+earlier `071101` marker observations; canonical imports remain pending.
 The Browser plugin still has no binding; this authorized Playwright instance is
 independent of the owner's existing browser and Telegram installations.
 
@@ -474,13 +500,15 @@ mutate the public edge or certificate owner.
 
 ## Enable server ledger authority
 
-The identical-source final recovery pair is now current and previous. Before
-authority activation, both existing real Telegram profiles must still persist
-the final compiled client marker and pass foreground/reopen with snapshot
-preservation. Their earlier `071101` markers do not cover the deployed fix;
-the separate John Cometa Web profile does not substitute for them. The recovery
-passed 815 tests and Linux CI. Its emergency review exception does not waive
-these data-preservation gates or prove two-profile server-ledger acceptance.
+The identical-source recovery pair is current and previous. Both original Old
+profiles now persist compiled marker `104102` with their exact 438-row snapshots;
+the owner waived the remaining manual native-control/foreground check. The
+separate John Cometa Web profile does not substitute for original-device import.
+Activation was authorized but stopped safely at the WAL backup verification
+described above. Its separate owner review exception is now explicit: release the
+verified operator fix through the normal immutable lifecycle, then retry the guarded command.
+Preserve normal first import from each original device. Neither the review
+exception nor the manual check waiver proves two-profile server-ledger acceptance.
 
 ```bash
 sudo /srv/cometa-bank/current/deploy/standalone/scripts/release.sh ledger-mode status
@@ -489,7 +517,8 @@ sudo /srv/cometa-bank/current/deploy/standalone/scripts/release.sh ledger-mode s
 ```
 
 The dry run repeats the complete preflight. `--apply` creates a root-only,
-WAL-safe SQLite backup, verifies it through both bot images, fsyncs the backup
+WAL-safe SQLite backup, verifies a disposable DELETE-mode copy through both bot
+images without changing the durable backup's WAL mode, fsyncs the backup
 and audit journal, switches the one persisted marker in a parameterized SQLite
 transaction, and restarts the current bot. Startup republishes the mutation
 commands only after the durable `server` marker exists. The operator then

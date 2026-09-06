@@ -86,11 +86,29 @@ verify_authority_release() {
 backup_probe_failure_release=''
 verify_local_authority_backup_with_image() {
   [[ -f "$2" ]] || return 1
+  [[ "$(sqlite3 -readonly -batch -noheader "$2" 'PRAGMA journal_mode;')" == 'delete' ]] || {
+    printf 'ERROR: WAL backup copy was not normalized to DELETE\n' >&2
+    return 1
+  }
+  [[ "$(sqlite3 -readonly -batch -noheader "$2" \
+    "PRAGMA quick_check; SELECT ledger_mode FROM service_state WHERE singleton = 1; SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name IN ('bank_operations', 'bank_outbox', 'bank_states', 'conversation_sessions', 'service_state');")" == \
+    $'ok\nlocal\n5' ]] || return 1
   if [[ "$1" == "${backup_probe_failure_release}" ]]; then
     record_event "verify-backup-failed:$1"
     return 1
   fi
   record_event "verify-backup:$1"
+}
+
+backup_normalization_failure=''
+sqlite3() {
+  if [[ "$*" == *'PRAGMA journal_mode=DELETE;' ]]; then
+    case "${backup_normalization_failure}" in
+      command) return 1 ;;
+      unchanged) printf 'wal\n'; return 0 ;;
+    esac
+  fi
+  command sqlite3 "$@"
 }
 
 stat() {
@@ -236,6 +254,9 @@ fi
 
 # The production backup flow uses SQLite online backup, verifies quick_check,
 # requires the local marker, probes both images, and only then fsyncs the file.
+# Match production WAL, while requiring only its disposable copy to become a
+# self-contained DELETE database readable by the read-only image probe.
+[[ "$(sqlite3 "${live_database_path}" 'PRAGMA journal_mode=WAL;')" == 'wal' ]] || exit 1
 : >"${event_file}"
 backup_path="$(prepare_ledger_mode_backup \
   "${expected_current_release}" "${expected_previous_release}")"
@@ -244,7 +265,30 @@ backup_path="$(prepare_ledger_mode_backup \
 [[ "$(sqlite3 -batch -noheader "${backup_path}" 'PRAGMA quick_check;')" == 'ok' ]]
 [[ "$(sqlite3 -batch -noheader "${backup_path}" \
   'SELECT ledger_mode FROM service_state WHERE singleton = 1;')" == 'local' ]]
+[[ "$(sqlite3 "${live_database_path}" 'PRAGMA journal_mode;')" == 'wal' ]] || exit 1
+[[ "$(sqlite3 "${backup_path}" 'PRAGMA journal_mode;')" == 'wal' ]] || exit 1
+[[ "$(sqlite3 "${backup_path}" .dump)" == "$(sqlite3 "${live_database_path}" .dump)" ]] || exit 1
 [[ "$(<"${event_file}")" == $'verify-backup:20990102T000000Z\nverify-backup:20990101T000000Z\nsync-backup' ]]
+
+# A failed conversion or a successful PRAGMA that retains WAL must stop before
+# either image probe or the authority switch and remove the disposable copy.
+for backup_normalization_failure in command unchanged; do
+  command rm -f -- "${backup_path}"
+  reset_database
+  [[ "$(sqlite3 "${live_database_path}" 'PRAGMA journal_mode=WAL;')" == 'wal' ]] || exit 1
+  apply_rollback=true
+  : >"${event_file}"
+  if (enable_server_ledger_mode) >"${output_file}" 2>&1; then
+    fail "failed backup journal normalization was accepted: ${backup_normalization_failure}"
+  fi
+  grep -Eq 'cannot normalize|must use DELETE journal mode' "${output_file}" || exit 1
+  [[ "$(read_database_ledger_mode)" == 'local' ]] || exit 1
+  [[ "$(sqlite3 "${live_database_path}" 'PRAGMA journal_mode;')" == 'wal' ]] || exit 1
+  [[ "$(sqlite3 "${backup_path}" 'PRAGMA journal_mode;')" == 'wal' ]] || exit 1
+  [[ ! -e "${backup_path}.compat" ]] || exit 1
+  ! grep -Eq 'verify-backup:|switch-server|audit:' "${event_file}" || exit 1
+done
+backup_normalization_failure=''
 
 # Either authority-image probe can fail after the service-owned compatibility
 # copy exists. Its function-local EXIT trap must remove that copy before the

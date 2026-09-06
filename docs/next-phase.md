@@ -8,7 +8,17 @@ repeated profile `429`. Full and ledger status exited 0; evidence:
 `/private/tmp/cometa-104102-live-status.log`. Mode remains LOCAL with zero owner canonical imports;
 expanded bank chat flows are not active. Final `pnpm verify` passed again at `13:01Z`: 815 tests,
 lint/deploy guards/build.
-Combined Opus review produced no accepted report because the organization disabled Claude Code
+The `14:37:32Z` server-mode attempt failed before mode switch/restart: a read-only single-file WAL
+backup could not create SQLite sidecars (code 14). The retained root `0600` backup
+`/srv/cometa-bank/backups/20260906T143732Z-before-ledger-mode-server.sqlite` passes `quick_check`
+and remains LOCAL. An uncommitted release-script/regression fix normalizes only disposable `.compat`
+to DELETE, never live DB or durable backup; 815 tests, compiling mutant and both existing-image
+read-only Docker probes pass. The owner explicitly waived Opus for this existing WAL fix and
+authorized scoped completion; this is separate from the earlier `774f0ae` waiver. The retry in
+`/private/tmp/claude-paired-review-wal-backup-retry-20260906/attempt.md` produced no report and was
+stopped by the operator after ten minutes, not clean or a reconfirmed organization-access error.
+Proceed with the normal immutable deploy, without another Opus attempt; deployment/server activation
+are not yet verified complete. The earlier recovery review produced no report because the organization disabled Claude Code
 access. The owner explicitly waived missing review only for emergency recovery source `774f0ae`.
 That narrow exception closes its deploy gate, not a clean review or a future-change waiver.
 The earlier failed B `095602` activation and unhealthy rollback A `095601` are incident history.
@@ -25,8 +35,10 @@ The 9 signed checks passed again at `10:05Z`; live health and LOCAL/zero imports
 at `10:08Z`. Final packages `20260906T095601Z`/`20260906T095602Z` were uploaded at `10:19Z`;
 local/remote checksums, extracted source parity and strict preflights passed before the failed B
 activation and unhealthy rollback A. Public visuals are in `51a2eb0`; latest Linux CI for `774f0ae`
-passed at `12:16:08Z`, run `34032518573`. At `13:03:18Z`, both Old 438-row snapshots retained hashes
-and marker `071101`, with zero imports. Real Telegram Web John Cometa independently completed
+passed at `12:16:08Z`, run `34032518573`. Both original Old profiles reached compiled `104102` at
+`14:36:25Z`; parity at `14:56:22Z` reconfirmed unchanged 438-row transaction/balance hashes, LOCAL,
+canonical false and zero imports. The owner waived remaining manual native button/foreground
+acceptance; this is not a tested pass. Real Telegram Web John Cometa independently completed
 English→KZT→ready→Open Cometa→Telegram consent→embedded Mini App on compiled `104102`, with
 437 rows/four accounts and no reset or mutation. At `12:58Z` ChatGPT search returned nine results
 including original Pending, Received filter returned zero, RU→English and primary KZT→USD→KZT
@@ -35,7 +47,8 @@ passed with display-only currency changes. Exact transaction/account hashes stay
 draft `123 KZT` survived tab switch/back, dynamic native MainButton was enabled, native Back closed
 the sheet, and close → `/help` (four LOCAL commands) → new Open Cometa button reopened the app.
 Final proof at `13:03:48Z` retained identical hashes, 437 rows/four accounts, English/KZT/compiled
-104102/LOCAL. Distinct John Web QA is complete; Old final-build, phone and server-mode gates remain.
+104102/LOCAL. Distinct John Web QA and Old final-build marker/parity are complete; phone and
+server-mode gates remain, with manual native button/foreground scope waived rather than tested.
 The milestone is not accepted.
 
 The deployed source passed 763 tests, 10 local web-browser checks, 9 synthetic signed real-backend
@@ -76,9 +89,9 @@ in `docs/handoff.md`; architecture remains canonical in `docs/spec.md`.
   `/private/tmp/cometa-telegram-web-qa.Mtuner/profile`, QR-authenticated by the owner. Real Web
   onboarding completed in John Cometa. Its namespace hash `b8c452f98d` is distinct from Old Nikita
   `5a39b27c62` and MetaFlexer `a98ab714e4`; do not conflate the three profiles. John has compiled
-  `104102`, 437 rows/four accounts, no resets/mutations; both Old 438-row hashes and marker `071101`
-  were unchanged at `13:03:18Z`. Distinct John Web foreground/reopen and native-control QA passed;
-  Old final-build and phone gates remain open.
+  `104102`, 437 rows/four accounts, no resets/mutations; both Old 438-row hashes remained unchanged
+  on marker `104102` at `14:56:22Z`. Distinct John Web foreground/reopen and native-control QA passed;
+  remaining manual native button/foreground checks were owner-waived, not tested. Phone gates remain.
 - Two showcase compositions are published in `51a2eb0`: actual web screenshots and an explicitly illustrative
   Telegram preview using exact bot-engine copy, not native captures. Their provenance is in
   `docs/assets/showcase/README.md`; neither replaces real-profile acceptance.
@@ -154,26 +167,24 @@ in `docs/handoff.md`; architecture remains canonical in `docs/spec.md`.
 
 1. Read `CLAUDE.md`, `docs/handoff.md`, this file and `deploy/standalone/README.md`.
 2. Inspect `git status` and preserve unrelated changes. Recovery `774f0ae` is deployed under the
-   explicit owner emergency waiver for its missing Opus review only. Organization access remains
-   disabled; this is not clean review or permission to skip future reviews. Do not start another
-   improvement/review cycle or repeat recovery. Continue the bounded acceptance already in progress.
+   explicit owner emergency waiver for its missing Opus review only. The owner has now separately
+   waived Opus for the existing `.compat` WAL fix and authorized scoped completion. Its silent retry
+   was operator-stopped after ten minutes without a report, not clean or a new access-error verdict.
+   Do not start another Opus attempt or improvement cycle; proceed with this tested fix only.
 3. Recheck Irena, current/previous images, containers/restarts, `ledger_mode=local`, Caddy semantics,
    exact loopback bindings, quiesced renewal units, DNS and TLS/API smoke. The Docker/Caddy bridge
    is already installed; do not rerun its host-wide migration as the next normal release step.
-4. Keep the recovered A104101/B104102 rollback pair on `774f0ae`; do not rerun prepare/activate or
-   the host migration. Both ordinary health/TLS/API gates and root-only WAL-safe backups are done.
+4. Keep the recovered A104101/B104102 rollback pair until the now-authorized operator fix is
+   packaged and deployed through the normal immutable
+   release lifecycle; never hot-patch the current release or repeat the host migration. The recovery
+   pair's ordinary health/TLS/API gates and root-only WAL-safe backups are already verified.
    Older `075300`/`075301`, `092401`/`092402`, `094101`/`094102` and incident `095601`/`095602`
    are not the active rollback pair. Preserve the DB/token and LOCAL mode during remaining QA.
-5. Repeat real Telegram Old foreground/reopen, native-control and snapshot-preservation checks in
-   Nikita and MetaFlexer. Verify the new compiled marker in both profiles and keep the existing
-   438-row snapshots intact except for legitimate time-derived settlement. The owner authorized
-   deploy and QA of these own profiles, including mock-bot messages and callbacks; unrelated
-   external actions are not covered by that authorization.
-   Desktop automation is limited, but the owner-authenticated isolated Web profile is now available.
-   Focused Web QA for distinct John Cometa is complete, including foreground/native controls and
-   fresh `/help` launch with exact bank-state preservation. Do not substitute that distinct namespace
-   for Old's final-build release-marker/preservation retests.
-6. Only after the fix and real-profile retest, apply the one-way server-mode switch and import each
+5. Preserve both Old final-build `104102`/438-row parity proofs and completed distinct John Web QA.
+   The owner explicitly waived remaining manual native button/foreground acceptance; do not label
+   that scope tested. Do not conflate namespaces or reset snapshots to manufacture acceptance.
+6. After the authorized `.compat` fix is deployed and verified, retry the one-way switch
+   that previously failed code 14 before mode/restart, then import each
    preserved device snapshot once. Prove one-off, recurrence/backfill, overdraft rejection,
    add/adjust/close/restore, current→previous→current survival and cross-profile isolation. Use RU/EN
    journeys without reseeding existing accounts to manufacture a different base currency.

@@ -78,6 +78,11 @@ The web demo and bot are live. Real Telegram Web onboarding and embedded Mini Ap
 on the current release. The recovery build passes 815 automated tests and Linux CI; existing
 demo histories remain intact.
 
-The expanded Telegram ledger remains a release candidate. Signed real-backend, foreground-recovery
-and first-import browser scenarios pass, but server activation and real two-profile Telegram
-acceptance are still pending. Browser emulation does not establish Android or iOS WebView acceptance.
+Both original Telegram profiles now load the current build with their 438-entry histories intact.
+Remaining manual native button/foreground checks were waived by the owner, not recorded as tested.
+
+The expanded Telegram ledger is still disabled: activation stopped at a backup-compatibility check
+before changing local mode. The owner authorized the tested fix without another Opus review;
+its deployment and server activation are not yet verified. Live bot transaction screenshots,
+two-profile server isolation and rollback checks remain pending; the chat visual above is illustrative.
+Browser emulation does not establish Android or iOS WebView acceptance.
