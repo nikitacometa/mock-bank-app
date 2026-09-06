@@ -29,6 +29,43 @@ afterEach(() => {
 });
 
 describe('startTelegramPreferenceBootstrap', () => {
+  it('recovers late first SDK data on the bounded cold ladder without any external event', async () => {
+    vi.useFakeTimers();
+    let fingerprint: string | undefined = undefined;
+    const synchronize = vi.fn(async () => fingerprint === undefined ? 'absent' as const : 'applied' as const);
+    const onReady = vi.fn();
+    const cleanup = startTelegramPreferenceBootstrap({
+      platform: { ...telegramPlatform(), getSessionFingerprint: () => fingerprint },
+      onReady, synchronize, subscribeRetry: () => () => undefined,
+    });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(synchronize).toHaveBeenCalledOnce();
+    fingerprint = 'late-without-an-edge';
+    await vi.advanceTimersByTimeAsync(700);
+    expect(synchronize).toHaveBeenCalledTimes(2);
+    expect(onReady).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
+  it('bounds repeated cold absence without extending the splash past its deadline', async () => {
+    vi.useFakeTimers();
+    const synchronize = vi.fn().mockResolvedValue('absent');
+    const onReady = vi.fn();
+    const cleanup = startTelegramPreferenceBootstrap({
+      platform: { ...telegramPlatform(), getSessionFingerprint: () => undefined },
+      onReady, synchronize, subscribeRetry: () => () => undefined,
+    });
+    await vi.advanceTimersByTimeAsync(4_499);
+    expect(onReady).not.toHaveBeenCalled();
+    expect(synchronize).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onReady).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(synchronize).toHaveBeenCalledTimes(4);
+    expect(vi.getTimerCount()).toBe(0);
+    cleanup();
+  });
+
   it('adopts the first late fingerprint without aborting cold bootstrap or imposing foreground cooldown', async () => {
     vi.useFakeTimers();
     let fingerprint: string | undefined = undefined;

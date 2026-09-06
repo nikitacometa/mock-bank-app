@@ -188,8 +188,9 @@ export function startTelegramPreferenceBootstrap({
         // A fulfilled synchronization has crossed the isolation boundary even
         // when a test double omits the explicit callback.
         markIdentityIsolated();
-        idleRefreshAllowed = result !== 'retry';
-        settle(result === 'retry');
+        const retry = result === 'retry' || (result === 'absent' && !hasObservedFingerprint);
+        idleRefreshAllowed = !retry;
+        settle(retry);
         if (isForeground) onSynchronized?.(result, controller.signal);
       },
       (error: unknown) => {
@@ -303,6 +304,7 @@ export function BootstrapGate({ children }: { children: ReactNode }) {
   const platform = usePlatform();
   const [ready, setReady] = useState(!platform.isTelegram);
   const [syncPending, setSyncPending] = useState(false);
+  const [recoveryVisible, setRecoveryVisible] = useState(false);
   const [manualRetry, setManualRetry] = useState(0);
   const locale = useUiStore((state) => state.locale);
   const ledgerMode = useBankStore((state) => state.ledgerMode);
@@ -314,7 +316,10 @@ export function BootstrapGate({ children }: { children: ReactNode }) {
     return startTelegramPreferenceBootstrap({
       platform,
       onReady: () => setReady(true),
-      onPendingChange: setSyncPending,
+      onPendingChange: (pending) => {
+        setSyncPending(pending);
+        if (!pending) setRecoveryVisible(useBankStore.getState().ledgerMode === 'read_only');
+      },
       onSynchronized: (result, signal) => {
         if (
           signal.aborted ||
@@ -343,7 +348,7 @@ export function BootstrapGate({ children }: { children: ReactNode }) {
 
   if (ready && ledgerMode !== 'read_only') return children;
 
-  if (ready && (!syncPending || ledgerSyncError === 'server_copy_confirmation_required')) {
+  if (ready && (recoveryVisible || !syncPending || ledgerSyncError === 'server_copy_confirmation_required')) {
     const needsServerCopyConfirmation =
       ledgerSyncError === 'server_copy_confirmation_required';
     return (
@@ -376,10 +381,13 @@ export function BootstrapGate({ children }: { children: ReactNode }) {
           </p>
           <button
             type="button"
-            className="mt-6 min-h-11 rounded-full bg-ivory px-5 text-[0.875rem] font-semibold text-bg"
+            className="mt-6 min-h-11 rounded-full bg-ivory px-5 text-[0.875rem] font-semibold text-bg disabled:opacity-50"
+            disabled={syncPending && !needsServerCopyConfirmation}
+            aria-busy={syncPending && !needsServerCopyConfirmation}
             onClick={() => {
               if (needsServerCopyConfirmation && !approveServerCopy()) return;
               setReady(false);
+              setRecoveryVisible(false);
               setManualRetry((value) => value + 1);
             }}
           >

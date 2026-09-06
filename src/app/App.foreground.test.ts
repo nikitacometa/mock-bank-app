@@ -177,6 +177,15 @@ describe('Telegram foreground synchronization ownership', () => {
         expect(container.querySelector('button')?.textContent).toBe('Try again');
         expect(useBankStore.getState().ledgerMode).toBe('read_only');
         expect(storage.get('cometa.bank.tma.user.42')).toBe(persisted);
+        const retryButton = container.querySelector('button');
+        const retry = pendingBootstrap();
+        await scheduledRetry();
+        expect(container.querySelector('button')).toBe(retryButton);
+        expect(retryButton?.disabled).toBe(true);
+        expect(container.textContent).not.toContain('Setting up Cometa');
+        await act(async () => retry.reject(new TypeError('Still offline')));
+        expect(container.querySelector('button')).toBe(retryButton);
+        expect(retryButton?.disabled).toBe(false);
       }
       expect(useBankStore.getState().transactions).toEqual(transactions);
     },
