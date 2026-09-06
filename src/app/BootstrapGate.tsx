@@ -240,8 +240,7 @@ export function startTelegramPreferenceBootstrap({
     if (cancelled) return;
     const fingerprint = platform.getSessionFingerprint?.();
     const identityChanged = observedFingerprint !== undefined && fingerprint !== observedFingerprint;
-    const resumeAbsentColdLaunch = !hasObservedFingerprint && fingerprint !== undefined &&
-      idleRefreshAllowed && !retryPending && !attemptRunning;
+    const resumeAbsentColdLaunch = !hasObservedFingerprint && fingerprint !== undefined && !attemptRunning;
     if (fingerprint !== undefined) hasObservedFingerprint = true;
     // First SDK availability is not an account switch. The in-flight sync
     // checks its own captured fingerprint and retries on the short cold ladder.
@@ -270,6 +269,11 @@ export function startTelegramPreferenceBootstrap({
     if (resumeAbsentColdLaunch) {
       // A completed `absent` probe has no verified session to refresh. SDK
       // availability resumes its cold ladder, not the 30-second foreground lane.
+      if (retryId !== undefined) globalThis.clearTimeout(retryId);
+      if (externalRetryId !== undefined) globalThis.clearTimeout(externalRetryId);
+      retryId = undefined;
+      externalRetryId = undefined;
+      externalSignalPending = false;
       retryPending = true;
       retryIndex = 0;
       if (scheduleRetry()) return;
@@ -351,6 +355,7 @@ export function BootstrapGate({ children }: { children: ReactNode }) {
   if (ready && (recoveryVisible || !syncPending || ledgerSyncError === 'server_copy_confirmation_required')) {
     const needsServerCopyConfirmation =
       ledgerSyncError === 'server_copy_confirmation_required';
+    const recovering = syncPending && !needsServerCopyConfirmation;
     return (
       <div
         className="flex min-h-[var(--app-height)] items-center justify-center bg-bg px-6 text-ink"
@@ -366,6 +371,10 @@ export function BootstrapGate({ children }: { children: ReactNode }) {
               ? locale === 'ru'
                 ? 'На сервере уже есть ваше демо'
                 : 'Your server demo is already active'
+              : recovering
+                ? locale === 'ru'
+                  ? 'Синхронизируем с Cometa'
+                  : 'Syncing with Cometa'
               : locale === 'ru'
                 ? 'Счета пока только для чтения'
                 : 'Accounts are read-only for now'}
@@ -375,16 +384,20 @@ export function BootstrapGate({ children }: { children: ReactNode }) {
               ? locale === 'ru'
                 ? 'Первая загруженная версия стала основной. Локальная история этого устройства не объединяется и останется без изменений, пока вы не выберете серверную копию.'
                 : 'The first imported version is canonical. This device’s local history will not be merged or changed until you choose the server copy.'
+              : recovering
+                ? locale === 'ru'
+                  ? 'Сверяем историю с сервером. Счета откроются после синхронизации.'
+                  : 'Checking your history with the server. Accounts will reopen when synchronization finishes.'
               : locale === 'ru'
-                ? 'Не удалось свериться с Cometa. Данные не изменятся, пока связь не восстановится.'
-                : 'Cometa could not sync safely. Nothing will change until the connection is restored.'}
+                ? 'Не удалось завершить синхронизацию. Повторите попытку, чтобы проверить состояние счетов.'
+                : 'Cometa could not sync safely. Try again to check the latest account state.'}
           </p>
           <button
             type="button"
-            className="mt-6 min-h-11 rounded-full bg-ivory px-5 text-[0.875rem] font-semibold text-bg disabled:opacity-50"
-            disabled={syncPending && !needsServerCopyConfirmation}
-            aria-busy={syncPending && !needsServerCopyConfirmation}
+            className="mt-6 min-h-11 rounded-full bg-ivory px-5 text-[0.875rem] font-semibold text-bg aria-disabled:opacity-50"
+            aria-disabled={recovering}
             onClick={() => {
+              if (recovering) return;
               if (needsServerCopyConfirmation && !approveServerCopy()) return;
               setReady(false);
               setRecoveryVisible(false);

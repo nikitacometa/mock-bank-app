@@ -178,14 +178,48 @@ describe('Telegram foreground synchronization ownership', () => {
         expect(useBankStore.getState().ledgerMode).toBe('read_only');
         expect(storage.get('cometa.bank.tma.user.42')).toBe(persisted);
         const retryButton = container.querySelector('button');
+        retryButton?.focus();
         const retry = pendingBootstrap();
+        let retryRequest: BankImportRequest | undefined;
+        let retryImportSignal: AbortSignal | undefined;
+        let finishRetryImport!: (value: BankImportResponse) => void;
+        host.importBank.mockImplementationOnce((value, signal) => {
+          retryRequest = value;
+          retryImportSignal = signal;
+          return new Promise<BankImportResponse>(resolve => { finishRetryImport = resolve; });
+        });
         await scheduledRetry();
         expect(container.querySelector('button')).toBe(retryButton);
-        expect(retryButton?.disabled).toBe(true);
+        expect(retryButton?.getAttribute('aria-disabled')).toBe('true');
+        expect(document.activeElement).toBe(retryButton);
+        expect(container.querySelector('[role="status"]')?.textContent).toContain('Syncing with Cometa');
+        expect(container.textContent).not.toContain('could not sync');
+        expect(container.textContent).not.toContain('Nothing will change');
         expect(container.textContent).not.toContain('Setting up Cometa');
-        await act(async () => retry.reject(new TypeError('Still offline')));
+        const loadCount = host.load.mock.calls.length;
+        await act(async () => retryButton?.click());
+        expect(host.load).toHaveBeenCalledTimes(loadCount);
+        expect(retry.signal().aborted).toBe(false);
+        await act(async () => retry.resolve({
+          ...preferences(),
+          bank: { contractVersion: 1, mode: 'import_required', telegramId: '42' },
+        }));
+        expect(host.importBank).toHaveBeenCalledTimes(2);
         expect(container.querySelector('button')).toBe(retryButton);
-        expect(retryButton?.disabled).toBe(false);
+        expect(document.activeElement).toBe(retryButton);
+        expect(container.querySelector('[role="status"]')?.textContent).toContain('Syncing with Cometa');
+        expect(container.textContent).not.toContain('Nothing will change');
+        expect(retryImportSignal?.aborted).toBe(false);
+        expect(storage.get('cometa.bank.tma.user.42')).toBe(persisted);
+        if (retryRequest === undefined) throw new Error('Expected the retry import snapshot');
+        const importedState = retryRequest.state;
+        await act(async () => finishRetryImport({
+          version: 1, mode: 'server', imported: true, telegramId: '42',
+          revisionEpoch: 'b'.repeat(32), revision: 1, digest: 'c'.repeat(64),
+          warnings: [], state: importedState,
+        }));
+        expect(container.querySelector('main h1')?.textContent).toBe('Cometa');
+        expect(useBankStore.getState().ledgerMode).toBe('server');
       }
       expect(useBankStore.getState().transactions).toEqual(transactions);
     },

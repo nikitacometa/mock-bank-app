@@ -148,6 +148,64 @@ describe('startTelegramPreferenceBootstrap', () => {
     cleanup();
   });
 
+  it.each([
+    { label: 'after the cold ladder is exhausted', availableAt: 15_000, earlierEdgeAt: undefined, starts: [0, 1_000, 4_000, 12_000, 16_000] },
+    { label: 'while a cold ladder timer is pending', availableAt: 5_000, earlierEdgeAt: undefined, starts: [0, 1_000, 4_000, 6_000] },
+    { label: 'while an external cooldown timer is pending', availableAt: 15_000, earlierEdgeAt: 14_000, starts: [0, 1_000, 4_000, 12_000, 16_000] },
+  ])('resumes first SDK availability in one second $label without leaving duplicate timers', async ({ availableAt, earlierEdgeAt, starts }) => {
+    vi.useFakeTimers();
+    const startedAt = Date.now();
+    const actualStarts: number[] = [];
+    let fingerprint: string | undefined = undefined;
+    let retryOnSignal: ((signal: 'online' | 'visible') => void) | undefined;
+    const synchronize = vi.fn(async () => {
+      actualStarts.push(Date.now() - startedAt);
+      return fingerprint === undefined ? 'absent' as const : 'applied' as const;
+    });
+    const cleanup = startTelegramPreferenceBootstrap({
+      platform: { ...telegramPlatform(), getSessionFingerprint: () => fingerprint },
+      onReady: () => undefined, synchronize,
+      subscribeRetry: listener => { retryOnSignal = listener; return () => undefined; },
+    });
+    if (earlierEdgeAt !== undefined) {
+      await vi.advanceTimersByTimeAsync(earlierEdgeAt);
+      retryOnSignal?.('online');
+      expect(vi.getTimerCount()).toBe(1);
+    }
+    await vi.advanceTimersByTimeAsync(availableAt - (earlierEdgeAt ?? 0));
+    fingerprint = 'first-available-after-cold-absence';
+    for (let edge = 0; edge < 5; edge += 1) retryOnSignal?.('visible');
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(actualStarts).toEqual(starts.slice(0, -1));
+    await vi.advanceTimersByTimeAsync(1);
+    expect(actualStarts).toEqual(starts);
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(actualStarts).toEqual(starts);
+    cleanup();
+  });
+
+  it('does not reset the global attempt budget when first SDK data finally appears', async () => {
+    vi.useFakeTimers();
+    let fingerprint: string | undefined = undefined;
+    let retryOnSignal: ((signal: 'online' | 'visible') => void) | undefined;
+    const synchronize = vi.fn(async () => fingerprint === undefined ? 'absent' as const : 'applied' as const);
+    const cleanup = startTelegramPreferenceBootstrap({
+      platform: { ...telegramPlatform(), getSessionFingerprint: () => fingerprint },
+      onReady: () => undefined, synchronize, maxAttempts: 4,
+      subscribeRetry: listener => { retryOnSignal = listener; return () => undefined; },
+    });
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(synchronize).toHaveBeenCalledTimes(4);
+    fingerprint = 'first-available-at-budget-limit';
+    retryOnSignal?.('visible');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(synchronize).toHaveBeenCalledTimes(4);
+    expect(vi.getTimerCount()).toBe(0);
+    cleanup();
+  });
+
   it('keeps cooldown when a previously observed session disappears and returns after an absent probe', async () => {
     vi.useFakeTimers();
     let fingerprint: string | undefined = 'original-session';
