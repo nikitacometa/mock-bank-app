@@ -1,97 +1,81 @@
 # Cometa — handoff
 
-Дата среза: 2026-09-07; timestamps ниже — 2026-09-06 UTC. Current B `20260906T173602Z`, previous
-A `20260906T173601Z`, оба source `ef9a960`. Оба prepared/activated и healthy: A в `17:45:07Z`,
-B в `17:46:54Z`. CI `34049087351` прошёл 815 tests. Оба Old профиля реально переоткрыты через
-Escape → main window Open Cometa, compiled `173602`, по 438 rows с прежними exact tx hashes.
-Новая попытка server activation в `18:04Z` остановилась до switch/restart/import: WAL-fix прошёл,
-но shell удалил SQL single quotes в embedded Node eval (`WHERE type = table`, syntax error).
-Mode LOCAL, imports 0, web/bot healthy. Две runtime строки operator заменены bound parameters,
-harness проверяет real Bash-parsed JS на scratch SQLite: focused/full 815 verify PASS, compiling
-exact-SQL-quoting mutant killed.
-Activation заблокирована до verified fix и нового immutable deploy; bank chat flows не включены.
-Попытка `ledger-mode server --apply` в `14:37:32Z` остановилась до mode switch/restart: read-only
-single-file WAL backup не может создать SQLite sidecars (code 14). Root `0600` backup сохранён:
-`/srv/cometa-bank/backups/20260906T143732Z-before-ledger-mode-server.sqlite`, `quick_check=ok`, LOCAL.
-Выпущенный `ef9a960` WAL-fix нормализует только disposable `.compat` в DELETE, не live DB/retained backup.
-815 tests и compiling mutant red/restored green; exact read-only Docker probes на обоих existing
-images прошли с normalized synthetic copy, original unchanged. Владелец явно разрешил текущий
-WAL-fix без Opus; это отдельный narrow waiver, не перенос прежнего `774f0ae` exception.
-Retry `/private/tmp/claude-paired-review-wal-backup-retry-20260906/attempt.md` не дал report и
-остановлен оператором после 10 минут: не clean и не повторно подтверждённая org access error.
-WAL-fix deployed в `173601`/`173602` без нового Opus attempt. Его gate пройден; последующий SQL
-quoting defect блокирует server activation, последний проверенный mode LOCAL.
-Final `pnpm verify` повторно прошёл 815 tests, lint/deploy guards/build в `13:01Z`.
-Ранее combined Opus review recovery не выполнился из-за отключённого организацией Claude Code
-access. Тогда владелец явно waived missing review только для emergency recovery
-source `774f0ae`; это закрывает только его deploy gate, не означает clean review или общий waiver.
-Предыдущие B `095602` activation и unhealthy rollback A `095601` из-за `setMyName 429` — история
-incident, устранённого profile read-before-write и guarded recovery.
-Candidate `2897de5` сохраняет предыдущие lifecycle/import исправления и закрывает terminal
-cold-session guard из v19 с red/green compiling mutant. Полный `pnpm verify` прошёл: 799 tests,
-577 web + 222 bot. Immutable real-browser pass прошёл 5 scenarios / 19 checks. Visual preference
-v19 о continuous progress отклонён: Chrome подтвердил неизменные geometry/focus, поведение явно
-зафиксировано в CLAUDE invariant. Это проверенный source pair неудачного deploy, не текущий healthy gate.
-Первоначальный v20 не запустился из-за session quota; exact Opus 5 retry завершён в `10:18Z`:
-verdict `clean`, 0 findings, resolved source `2897de5`.
-В `10:05Z` повторно пройдены 9 signed checks; healthy checkpoint `10:08Z` предшествует bot incident.
-Visuals опубликованы в `51a2eb0`. Последний Linux CI `ef9a960` green, run `34049087351` (815 tests);
-это не proof server activation или review нового SQL quoting fix.
-CLAUDE invariants ранее записаны в `ae9c65e`.
-Новый milestone
-ещё не принят.
+Дата среза: 2026-09-07; timestamps — 2026-09-06 UTC. Current B `20260906T181102Z`,
+previous A `20260906T181101Z`, оба source `bd435661abea6889aef59cb9e2ab77298fd4ce8d`.
+A prepared `18:13:06Z` / activated `18:15:52Z`; B prepared `18:14:06Z` / activated `18:17:35Z`.
+Оба healthy. CI `34050857794` PASS; final `pnpm verify` в `19:00Z` PASS: 815 tests (577 web +
+238 bot), lint/CSS/deploy harness/typecheck/build. Guarded `ledger-mode server --apply` PASS в
+`18:20:35Z`, durable marker `18:19:32Z`; обычные 31-second health и inner/outer TLS/API gates прошли.
+Root-only `0600` backup: `/srv/cometa-bank/backups/20260906T181909Z-before-ledger-mode-server.sqlite`.
+Telegram теперь SERVER-authoritative; standalone web остаётся device-local.
 
-Исторический gate deployed `5774b01`: 541 web + 222 bot tests, 10 local web-browser checks,
-9 synthetic signed real-backend checks и clean narrow Opus v13. Эти results не заменяют review
-candidate и повторный native pass после его deploy. Production isolated-browser pass также прошёл
-10 checks. Перед продолжением читать `CLAUDE.md`,
-затем этот файл; архитектурный канон остаётся в
-`docs/spec.md`, порядок выпуска — в `docs/next-phase.md`.
+Оба исходных Old профиля нормально переоткрыты и импортированы один раз: у каждого все 438 rows
+сохранены точно, revision 1, import 1, других операций нет. Реальные bot write journeys выполнены
+в отдельном John Telegram Web namespace; оба исходных canonical state остались byte-exact неизменными.
+QA rows не удалять: тестовый THB account закрыт, monthly rule paused. Guarded B→A→B rollback прошёл
+в `18:53:18Z`/`18:56:24Z`, все три canonical states exact unchanged в `18:56:45Z`, SERVER всё время,
+без DB restore. Real README visuals завершены и визуально проверены; Android/iOS и две native
+write journeys не пройдены. Доказанная схема QA — один реальный writer и два неизменённых canonical readers.
+
+Владелец явно попросил завершить эту работу без Opus. Новых attempts не запускать; предыдущие
+review waivers/неуспешные attempts не являются clean verdict. Исторические `setMyName 429`, WAL
+code 14 и SQL quoting incidents исправлены и описаны в единственном persistent audit, Revision 33.
+Перед продолжением: `CLAUDE.md`, этот файл, `docs/next-phase.md`, `deploy/standalone/README.md`.
+Архитектурный канон — `docs/spec.md`; итоговые runtime/QA evidence — ниже.
 
 ## Текущий результат
 
-На `https://euphoria.bot` web и bot healthy на B `173602`; server activation пока заблокирована.
-Пока `ledger_mode=local`,
-web и Telegram bank state остаются device-local; разрешённый bot profile содержит только
-non-mutating commands. Existing
-owner snapshots сохранены: Nikita — все 438 rows без изменения; MetaFlexer — 437→438 только за счёт
-interest settlement. Это два проверяемых собственных Telegram Old профиля; их не следует
-отождествлять с John Cometa по одному display name.
+`https://euphoria.bot` и bot healthy на B `181102`. Telegram использует per-profile canonical
+SQLite ledger; browser demo остаётся local. `/add`, `/recurring` и `/accounts` включены после
+guarded server activation. Первые импорты original Old Nikita и MetaFlexer сохранили точно по
+438 rows: revision 1/import 1/no other operations. Их canonical state не изменились после
+реальных write journeys в отдельном John Web namespace; не отождествлять их по display name.
 
-Оба оригинальных Old профиля Nikita и MetaFlexer реально прошли Escape → main window Open Cometa
-через AX Main Menu/account switching: compiled `173602`, по 438 rows, прежние exact tx hashes.
-Просьба manual reopen разрешена этим реальным pass. Ранее owner-waived remaining native
-button/foreground scope не превращается в tested pass; остальные phone gates открыты.
-По явной просьбе владельца открыт отдельный headed Chrome с fresh profile
-`/private/tmp/cometa-telegram-web-qa.Mtuner/profile`; владелец вошёл через QR. Реальный Telegram Web
-John Cometa прошёл English → KZT → Cometa is ready → Open Cometa → Telegram open-page consent →
-embedded Mini App. Web namespace hash `b8c452f98d` отличается от Old Nikita `5a39b27c62` и MetaFlexer
-`a98ab714e4`: не отождествлять эти namespace по display name. В Web compiled
-`104102`, 437 rows, 4 accounts; reset/mutations не выполнялись. Browser plugin по-прежнему без
-bindings; Playwright использует только отдельный owner-authorized profile. Focused John Web QA
-пройден, включая foreground/reopen; Old final-build marker/parity gate пройден. Phone и server-mode
-gates не закрыты; manual native button/foreground scope waived владельцем, не протестирован.
-В `12:58Z` John Web: поиск ChatGPT дал 9 результатов, включая original Pending; Received filter —
-0. RU→English и primary KZT→USD→KZT пройдены; currency меняла только total display. Точные hashes
-437 transactions и accounts не изменились, marker `104102`. KZT transfer `700000` заблокирован
-disabled Transfer с нехваткой `84040.43`; submit не выполнялся. Draft `123 KZT` сохранился после
-переключения на отдельную about:blank tab и обратно; native MainButton `Transfer ₸123.00` enabled,
-native Back закрыл sheet. Mini App закрыта, `/help` вернул четыре LOCAL commands, новая кнопка
-Open Cometa снова открыла приложение. Финальный `bank-proof` в `13:03:48Z`: те же hashes,
-437 rows/4 accounts, English, primary KZT, compiled `104102`, LOCAL. Submit/mutations не выполнялись.
+Реальный Telegram Web UI прошёл:
 
-Deployed bridge поднимает persistence до schema 5 и добавляет восемь deterministic fixtures:
-`KZT`, `THB`, `VND`, `RUB`, `USD`, `EUR`, `IDR`, `GEL`. Fresh fixture всегда начинает с четырёх
-role-accounts; KZT сохраняет owner history, остальные семь используют отдельные synthetic
-country-specific ledgers с тем же pinned USD economics. Onboarding currency выбирает fixture один
-раз; последующая primary currency меняет только reporting, а reset пересоздаёт тот же fixture.
-Server-mode flows предусматривают add и reversible close/restore checking accounts; пока mode
-local, эти bot-действия выключены. Home по-прежнему показывает
-USD-equivalent активного не-USD счёта; RU/EN покрывают весь interface и formatting.
+- Income `10 KZT` и expense `10 KZT`.
+- Monthly Spotify `3210 KZT` с `2026-07-16`: два backfill списания, всего `6420`, next `2026-09-16`;
+  после confirmation rule paused.
+- THB account add с нулём → adjust `100` → expense `101` rejected без canonical change у всех
+  трёх профилей → adjust `0` → close → restore → close.
 
-Ledger-derived balance, integer minor units, frozen FX snapshots, UTC-day interest, Web Lock
-rebase, idempotent transfers и platform seam сохранены. Explicit v4→v5 migration работает в
-deployed build; она не означает переход device-local данных под server authority.
+John checkpoint `18:50:33Z`: revision 11, 444 rows, import 1, 10 Telegram operations, 5 accounts
+(4 active/1 closed), 1 paused rule. Original 437-row prefix сохранён. QA rows не удалять;
+closed THB account и paused subscription — намеренные остатки проверки.
+
+Первый monthly preview не появился при WebSocket `1006`; draft сохранился, pending replies и
+errors отсутствовали. Свежий обычный wizard повторно прошёл. Причина не доказана как code defect.
+Отдельная ошибка private test helper из-за virtualized old-message counts исправлена ожиданием
+observed message IDs; это не app fix.
+
+Original Old нормально переоткрылись/импортировались, но inline callbacks ещё недоступны automation
+(no AX / `-10005`); основной Telegram тоже недоступен. Owner waiver сохранён, но это не две
+native write journeys и не Android/iOS pass. Ранее John Web отдельно прошёл onboarding, native
+Main/Back controls, foreground draft, `/help` reopen, RU/EN, display-only currency и no-overdraft UI.
+Эти результаты относятся к своим recorded snapshots, не заменяют phone acceptance.
+
+Восемь deterministic fixtures — KZT, THB, VND, RUB, USD, EUR, IDR, GEL — остаются; onboarding
+currency выбирает fixture один раз, последующие primary-currency изменения меняют только reporting.
+Fresh fixture имеет четыре role accounts; существующие owner данные и demo fixture не заменялись.
+Integer ledger money, frozen FX, UTC-day interest, reversible close и per-user isolation сохранены.
+Guarded B→A→B прошёл: оба dry-run/apply с immutable/perimeter/31-second health/inner+outer TLS/API
+gates. До/после обеих сторон exact rows/revisions `438/438/444` и `1/1/11`, stored/full-state/tx/balance
+hashes, operations/accounts/rules неизменны; mode SERVER, DB restore не было. Первый backup:
+`/srv/cometa-bank/backups/20260906T185147Z-before-20260906T181102Z.sqlite`.
+John normal Open Cometa показал Current `609539.57 KZT`, ровно 4 active chips без closed THB и QA
+income/expense в Recent Activity. Heading внутри app frame видим; иногда ложный parent-dialog wait
+при видимом frame не считаем app failure. После rollback реальный History search `Premium Individual`
+показал Spotify `−3210 KZT` на `July 16` и `August 16`, без лишних результатов. Closed THB history
+сохранила opening и обе корректировки `+100`/`−100`; на Home этот счёт скрыт.
+
+`docs/assets/showcase/telegram-showcase.png` (1600×1040) содержит ровно три неизменённых real
+Telegram Web captures 390×650 в одну строку: dashboard/expense picker, paused Spotify rule,
+account list/Current detail. Сняты на John B181102 после rollback, визуально проверены: без IDs,
+секретов или посторонних chats. Source: `telegram-{dashboard,recurring,accounts}-real.png` и
+`telegram.html`; provenance обновлён. Старый engine-preview JSON — только historical, не render source.
+`app-showcase.png` (1600×1240) сохраняет три реальные baseline Home/FX/History screens, без
+придуманных financial pixels. После rollback оба containers healthy, symlinks B181102/A181101;
+token metadata неизменно `10001:10001`, `0600`, значение не раскрывается.
 
 ## Owner statement demo
 
@@ -132,8 +116,8 @@ History откладывает текстовый filter через `useDeferred
 
 Frontend использует maintained `@tma.js/sdk-react` `3.0.23`. `adapter.telegram.ts` держит theme,
 ready/viewport, haptics, MainButton и BackButton за `PlatformAdapter`; экраны Telegram не знают.
-В live baseline raw `initData` уходит только в `POST /api/tma/bootstrap`, а bank state остаётся на
-device. Local authority candidate добавляет signed `bank-import`, `bank-command` и `bank-rates`:
+В историческом local baseline raw `initData` уходил только в bootstrap, bank state оставался на
+device. Live SERVER authority использует signed `bank-import`, `bank-command` и `bank-rates`:
 backend проверяет Telegram HMAC, duplicate keys, future skew и freshness, сам выводит canonical ID и
 после one-way activation хранит fictional `BankState` отдельно для него. TMA передаёт только typed
 commands или refresh intent; provider rate payload клиентом не принимается.
@@ -152,7 +136,7 @@ canonical adoption закрывает только stale account/card/transfer t
 
 `bot/` — dependency-free Node 22 worker с SQLite, RU/EN onboarding, выбором восьми currencies,
 optional display name, `/start`, `/settings`, `/help`, `/privacy`, menu button и profile setup.
-Local candidate добавляет `/add`, `/recurring`, `/accounts`, checking-only income/expense,
+Live bot добавляет `/add`, `/recurring`, `/accounts`, checking-only income/expense,
 explicit UTC year/month/day backfill до 120 строк, no-overdraft, current savings adjustment и
 reversible zero-balance close/restore. Следующий wizard session и предназначенный ему reply receipt
 пишутся одной SQLite transaction. Delivery status и `update_processed` завершаются независимо:
@@ -216,12 +200,9 @@ recovery path; обычные команды, которые всё ещё пр�
 В History закрытый счёт остаётся selectable и сохраняет историю; его accessible name явно
 добавляет localized `закрыт` / `closed`. Круглый marker остаётся визуальным и `aria-hidden`,
 а active account labels не получают status suffix.
-Пока ledger mode остаётся `local`, startup command profiles и `/help` показывают только
-`/start`, `/settings`, `/help`, `/privacy`; mutation UX не рекламируется до authority switch.
-
-Authority/wizard implementation теперь deployed в A/B, но пока выключен persisted `local` mode.
-Ни server ledger, ни mutating chat flows ещё не включены; local-mode bridge не должен рекламировать
-`/add`, `/recurring` и `/accounts` как доступные действия.
+До switch local profiles показывали только `/start`, `/settings`, `/help`, `/privacy`.
+Теперь persisted mode SERVER: authority/wizard implementation и `/add`, `/recurring`, `/accounts`
+включены. Реальные John Web write journeys и сохранность двух исходных canonical profiles проверены.
 
 Bot активирован на Irena. По явному решению владельца ранее опубликованный в chat token временно
 установлен только для тестового запуска: hidden-TTY installer подтвердил через `getMe` точный
@@ -278,10 +259,10 @@ Docker Engine `29.7.2` использует единственный `-H fd://`,
 B `20260906T071101Z` — в `07:23:53Z`. Это историческая успешная bridge pair, не текущие release IDs:
 позднее B `095602` activation не прошёл gate, automatic rollback A `095601` тоже unhealthy.
 Перед A и B созданы root-only WAL-safe SQLite backups в `07:20:46Z` и `07:22:22Z` соответственно,
-в `/srv/cometa-bank/backups` на том же VPS. Persisted `ledger_mode` остаётся `local`; импортов нет.
+в `/srv/cometa-bank/backups` на том же VPS. На том историческом checkpoint mode был `local`, imports 0.
 Старые C/D (`20260902T233104Z`/`20260902T233133Z`) и их вручную patched loopback source — только
-исторический migration evidence, не текущие rollback slots. Новый B→A→B persistence rehearsal
-ещё не принят и остаётся частью live authority QA.
+исторический migration evidence, не текущие rollback slots. Финальный B181102→A181101→B181102
+persistence rehearsal прошёл с exact preservation всех трёх canonical states.
 
 Deployed release contract устраняет прежний drift: Compose фиксирует exact loopback `8080/8443`,
 tracked Caddy contract описывает оба scoped host route без HSTS и trust bypass, а host preflight
@@ -317,9 +298,9 @@ units. Installed Caddyfile проверяется семантически то�
 `install-docker-perimeter.sh` dry-run и `--apply` → из A
 `release.sh harden-edge` dry-run и `--apply` → strict preflight A/B → prepare A/B → activate A/B при
 ledger mode `local`. Обе стороны стали source-clean. После позднего `setMyName 429` incident
-продолжать нужно по guarded recovery path, а не повторять host-wide migration или activation
-неизменённого bot. Совместимость ранней pair проверена release gates; фактический B→A→B с owner
-ledger changes ещё требует rehearsal.
+guarded recovery восстановил bot; host-wide migration и activation неизменённого bot не повторяли.
+Совместимость ранней pair проверена release gates; финальный B181102→A181101→B181102 с canonical
+owner/QA states также прошёл, SERVER mode и все данные сохранились без DB restore.
 
 Deployed code поддерживает двухрелизный authority bridge и one-way
 `release.sh ledger-mode server --apply`. `/app/<release-id>/` служит cache-key alias: любой
@@ -329,7 +310,8 @@ build доказывает compiled client-contract marker, не URL string. Е�
 `ledger-mode-server-reconciled` event и повторяет gates без ledger mutation. После durable final
 event operator restart'ит current bot, startup публикует RU/EN server command profiles, затем
 обязательны 31 continuous healthy seconds и TLS/API smoke. Reconciliation retry также restart'ит
-bot; failure не откатывает authority. Этот путь ещё не выполнялся на Irena.
+bot; failure не откатывает authority. На Irena guarded switch завершён `18:20:35Z`; normal first
+imports обоих исходных Old snapshots сохранили точно по 438 rows.
 
 Switch создаёт WAL-safe root-only SQLite backup на том же host. Encrypted offsite backup, retention
 monitoring и epoch-rotating restore drill явно отложены владельцем; до их реализации потеря Irena
@@ -348,7 +330,7 @@ Telegram Android/iOS acceptance.
 
 ## Verification evidence
 
-### Live bridge checkpoint (2026-09-06)
+### Historical local bridge checkpoint (2026-09-06)
 
 - Source `5774b01` прошёл consecutive A→B activation, strict Docker/Caddy perimeter,
   stable health и public/inner TLS/API smoke. Root-only WAL-safe backups созданы перед каждой
@@ -370,7 +352,7 @@ Telegram Android/iOS acceptance.
 - `ledger_mode=local`; server activation, canonical imports, live mutation journeys и новый
   B→A→B data-persistence rehearsal не выполнялись. Milestone и Android/iOS acceptance не закрыты.
 
-### Local candidate checkpoint (2026-09-06, `2897de5`)
+### Historical local candidate checkpoint (2026-09-06, `2897de5`)
 
 - Candidate `2897de5`: полный `pnpm verify` прошёл, 577 web + 222 bot = 799 tests, включая lint,
   CSS/deploy/bundle guards, typecheck и production builds. Immutable real-browser pass: 5 scenarios,
@@ -654,63 +636,24 @@ Telegram Android/iOS acceptance.
 
 ## Открытые gates
 
-1. Recovery deploy завершён и не требует повторения. Узкий owner waiver покрывает только missing
-   Opus review emergency source `774f0ae`; тот review не выполнен, clean не заявлен.
-   Не переносить waiver на будущие changes и не открывать дополнительный improvement/review cycle.
-2. Focused John Web QA завершён на своём recorded build; оба Old реально переоткрыты на `173602`
-   через AX Main Menu/account switching с сохранением 438 rows/exact hashes. Остальной ранее
-   waived native scope не помечать tested. Namespace John не отождествлять с Old по display name.
-3. WAL `.compat` fix выпущен в healthy `ef9a960` pair, CI 815 green. Новый blocker — SQL quoting
-   в operator embedded Node eval: switch в `18:04Z` остановился до mode/restart/import. Исправление
-   operator/harness в работе; после focused verification нужен новый immutable deploy без новой
-   Opus попытки, затем guarded server retry. До его success mode LOCAL/imports 0.
-   После verified activation
-   импортировать по одному canonical snapshot на профиль и пройти изолированные RU/EN journeys:
-   manual income/expense, recurrence с backfill/no-overdraft, add/adjust/close/restore и
-   current→previous→current continuity. Не reseed existing snapshots ради валюты сценария и не
-   подменять один из двух профилей John Cometa по имени.
-4. Только после live journeys снять три sanitized Telegram captures в одну строку README и повторить
-   public TLS/API/Playwright plus full verification. Текущие два visuals уже имеют provenance:
-   actual web screens и explicit illustrative Telegram engine preview, не native screenshots.
-5. Пройти Android/iOS Telegram WebView acceptance; desktop/browser emulation его не заменяет. Только
-   после этого можно выводить Hostinger origin из эксплуатации и обсуждать HSTS.
-6. До любого нетестового/публичного использования revoke/rotate установленный exposed test token и
-   поставить замену через hidden-TTY `release.sh install-token`. До rotation закрыть deferred
-   uutils/NSS restorePrevious mismatch в `deploy/bot/install-secret.sh`; текущий token не менялся.
-7. После двух clean bridge releases отдельной задачей перевести Caddy на loopback HTTP, удалить
-   redundant inner TLS/Certbot volume и legacy renewal code. До этого Caddy→Nginx `8443` остаётся
-   осознанным compatibility hop; legacy renewal units должны оставаться quiesced.
-8. Legacy Hostinger renewal source теперь валидирует/откатывает certificate set до reload, но в этом
-   цикле не установлен. Если Hostinger останется rollback origin дольше текущего acceptance окна,
-   установить renewal patch либо вывести origin до истечения его certificate.
-9. Отдельной задачей добавить encrypted offsite SQLite backup, retention/alerts и проверенный
-   epoch-rotating restore. До этого single-VPS loss остаётся принятым demo risk.
+1. B→A→B rollback завершён: final B181102/A181101, все три canonical states неизменны в `18:56:45Z`.
+   Authority SERVER; не повторять rehearsal/imports и не возвращать local ради acceptance.
+2. Real README visuals завершены: три неизменённых Telegram Web captures в одну строку, source
+   files/HTML/provenance сохранены. Старый illustrative JSON не используется для rendered showcase.
+3. Сохранить owner data и QA rows: обе исходные истории точно по 438 rows, John revision 11/444 rows,
+   THB QA account closed, recurrence paused. Income/expense/backfill/accounts и three-profile
+   canonical isolation уже доказаны; две native write journeys/Android/iOS не считать пройденными.
+4. Владелец попросил NO Opus для завершения этой работы. Не запускать новый review/improvement
+   cycle. Предыдущие waivers и cancelled/blocked attempts не являются clean review.
+5. Phone acceptance, offsite backup/restore, exposed test token rotation, Hostinger retirement/HSTS
+   и удаление compatibility inner TLS/Certbot остаются отдельными gates. Доступ к секретам — только
+   secure installer; текущие credentials в docs не добавлять.
 
 ## Pause checkpoint
 
-Intentional owner KZT fixture из четырёх счетов и 437 операций сохраняется без замены; ещё семь
-synthetic fixtures добавлены рядом, а не поверх него. Existing owner rows не сбрасывались;
-оба current 438-row snapshots сохраняются отдельно от frozen fixture. Source `5774b01` deployed как B
-`20260906T071101Z` с previous A `20260906T071100Z`, но новый milestone не принят и authority
-остаётся local. Candidate `2897de5` прошёл 799 tests и immutable browser 5 scenarios / 19 checks;
-terminal finding v19 исправлен, visual preference отклонён с browser/CLAUDE evidence. После
-исторической quota failure exact Opus 5 v20 retry завершён в `10:18Z`: clean, 0 findings на `2897de5`.
-Final pair `095601`/`095602` uploaded в `10:19Z`, local/remote checksums/source parity PASS;
-strict preflight выполняется, activation ещё не было.
-`092401`/`092402` и `094101`/`094102` superseded и не должны проходить prepare/activate. Завершить
-существующий gate без нового improvement cycle, затем продолжить
-normal lifecycle и переснять Irena/DNS/TLS/ledger-mode health. До первого server activation
-нужны final compiled markers и foreground/snapshot preservation в обоих native profiles.
-В `10:05Z` повторены 9 signed checks и точные hashes двух 438-row snapshots; live LOCAL/zero imports
-и health подтверждены в `10:08Z`. Coordinate inline clicks возвращают `-10005` также в разрешённом
-основном Telegram.app (`10:07Z`); Browser plugin не видит connected browser. Ответ на просьбу
-Settings → Computer use / Web Telegram login не получен; John Cometa не идентифицирован.
-Точная очередность записана в `docs/next-phase.md`.
-
-Старый source milestone, English product README, showcase и CI опубликованы в public GitHub repo
-`nikitacometa/mock-bank-app`; локальный `main` отслеживает `origin/main`. Owner явно выбрал public
-visibility при сохранении fingerprintable KZT fixture. Новые три Telegram screenshots пока не
-сняты с accepted live mutation journeys. Два локально обновлённых showcase visuals используют
-actual web screenshots и явно обозначенный illustrative Telegram preview с точным engine copy;
-provenance сохранён в `docs/assets/showcase/README.md`. Они не являются evidence live server-mode
-Telegram acceptance.
+Current B181102/previous A181101 на `bd435661abea6889aef59cb9e2ab77298fd4ce8d`, CI 815 green;
+guarded SERVER switch и три normal first imports завершены. Original Old canonical states
+сохранены byte-exact; John реальные bot writes прошёл, QA account closed/rule paused.
+Rollback B→A→B прошёл с exact states; real visuals завершены, final 815 verify green в `19:00Z`. Native automation waiver
+не заменяет две native write journeys/Android/iOS acceptance. Повторять import/reset нельзя.
+Точный resume order выше и в `docs/next-phase.md`; история incidents в persistent audit Revision 33.

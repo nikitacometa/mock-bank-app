@@ -1,6 +1,6 @@
 # Showcase sources
 
-Two 1600 × 1240 compositions, captured on 2026-09-06.
+Two compositions captured on 2026-09-06 UTC: application 1600 × 1240, Telegram 1600 × 1040.
 
 ## Application
 
@@ -13,19 +13,21 @@ subscriptions. No balances, merchants or interface text were painted over.
 
 ## Telegram
 
-`telegram-showcase.png` is a clearly labeled, sanitized product preview, not a Telegram screenshot.
-`telegram-preview.json` contains exact responses and keyboard labels captured from the production
-OnboardingEngine and BankFlowEngine using the real domain, BankAuthorityService and isolated SQLite.
-The identity is fictional. No Telegram API requests or production writes were made for this preview.
+`telegram-showcase.png` combines three actual 390 × 650 Telegram Web screenshots from the live bot
+on release `20260906T181102Z`. The owner-authorized John Cometa profile used a separate logged-in
+Chrome instance. Only the Cometa chat is visible; no other chats, login state, raw identifiers,
+credentials or launch payloads are included. UI text, balances and controls are unaltered.
 
-The monthly Spotify example starts on 2026-07-16. With a fixed 2026-09-06 UTC clock, the engine
-previews two historical entries of KZT 3,210. Only buttons returned by the engine are displayed.
-The three panels deliberately omit intermediate wizard steps; they are a feature overview, not a
-continuous chat transcript. `telegram.html` renders their layout.
+- `telegram-dashboard-real.png`: dashboard and the expense account picker.
+- `telegram-recurring-real.png`: monthly Spotify entry, paused after a successful two-entry backfill
+  from 2026-07-16; KZT 3,210 per month. Existing history remains intact.
+- `telegram-accounts-real.png`: account list and current-account controls after testing add,
+  adjustment, closure and restoration. The extra THB QA account is closed at zero.
 
-Do not treat these previews as real-profile or Android/iOS acceptance evidence. Replace them with
-three sanitized real-client captures once the corresponding live journeys pass, retaining the
-one-row composition and recording their provenance here.
+These are separate moments in the same real chat, not a continuous transcript or native Android/iOS
+acceptance. The three panels remain in one row. `telegram.html` adds only the editorial frame,
+captions and decorative background. The older `telegram-preview.json` is retained as historical
+engine-preview evidence and is no longer used by the public composition.
 
 ## Generated background
 
@@ -41,6 +43,6 @@ model identifier, so no GPT Image or Nano Banana version is claimed.
 
 Serve the repository root with a local static server. Open
 `/docs/assets/showcase/app.html` or `/docs/assets/showcase/telegram.html` in Playwright at a
-1600 × 1240 viewport. Wait for `document.fonts.ready`; the Telegram page also sets
+1600 × 1240 (application) or 1600 × 1040 (Telegram) viewport. Wait for `document.fonts.ready`; the Telegram page also sets
 `document.documentElement.dataset.ready` to `true` after rendering. Capture with `scale: 'css'`.
 Inspect the result for clipping and verify that every panel remains readable at README width.

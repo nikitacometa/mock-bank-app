@@ -21,26 +21,36 @@ certificate and renewal.
 
 ## Verified checkpoint — 2026-09-06
 
-Current is B `20260906T173602Z`, previous is A `20260906T173601Z`, both from
-`ef9a960`. A activated at `17:45:07Z`, B at `17:46:54Z`. Both passed immutable
+The final pair is B `20260906T181102Z` and A `20260906T181101Z`, both from
+`bd43566`. A activated at `18:15:52Z`, B at `18:17:35Z`. Both passed immutable
 image/perimeter checks, the 31-second stable-health window and inner/outer TLS/API
 smoke. Both packages passed 815 tests and extracted-source/checksum parity;
-Linux CI run `34049087351` passed. The original two Telegram Old profiles were
-normally reopened on this build, preserving each exact 438-row history and all
-balances. The separate Telegram Web profile also preserved its 437-row baseline.
+Linux CI run `34050857794` passed. Both original Telegram Old profiles were
+normally reopened and imported once, preserving each exact 438-row history and all
+balances. The separate John Cometa Web profile imported its own 437-row baseline.
 
-Ledger mode remains `local`. The authorized switch at `18:04Z` stopped before
-any mode change or bot restart: the WAL normalization now passes, but a shell-quoted
-Node script stripped the SQL literal in the required-table check. The parameterized
-query fix passes 815 tests. Its regression executes the actual shell-parsed verifier
-and switch scripts against scratch SQLite; restoring the old quoting reproduces
-the exact syntax error. Deployment is pending. Do not bypass this gate, patch an immutable release, reset client
-storage or import a substitute fixture. Package the fix normally, then retry
-`ledger-mode server --apply` through `current`.
+Ledger mode is `server`. The guarded one-way switch completed at `18:20:35Z`, including
+the durable marker, command setup, bot restart, stable health and both TLS/API boundaries.
+Backup: `backups/20260906T181909Z-before-ledger-mode-server.sqlite`, root-owned `0600`.
+Earlier WAL and Bash/SQL-quoting failures stopped safely before activation and are fixed.
+The regression executes the actual shell-parsed verifier and switch against scratch SQLite;
+restoring the old quoting reproduces the exact syntax error. A separate read-only Docker
+probe passed all ten checks across both runtime images using synthetic data only.
+
+Live John Web QA passed income, expense, two monthly backfill entries, pause, account add,
+adjust, close and restore. A THB 101 expense against THB 100 was rejected with all three
+canonical states unchanged. The QA account is closed at zero; the QA rule is paused.
+Both original profiles remain revision 1 with their exact imported histories.
+
+The guarded B → A → B rehearsal passed at `18:53:18Z` and `18:56:24Z`.
+Full canonical states, revisions, operations, balances and history hashes matched before
+and after both rollbacks for all three profiles (438 / 438 / 444 rows; revisions 1 / 1 / 11).
+Authority stayed `server`; no database restore was used. Current is B `181102`, previous A
+`181101`. The existing secret retained UID/GID `10001` and mode `0600`.
 
 The owner waived further Opus review for this scoped completion. This is a waiver,
-not a clean independent review. Server activation, canonical imports, live bot
-mutation/isolation and state-preserving rollback remain unverified.
+not a clean independent review. Native inline controls remain inaccessible to automation;
+the owner's manual-client waiver is not a tested native or Android/iOS pass.
 
 Live SSH configuration resolves `irena` to user `irena` (UID/GID `1001`). Use
 `ssh -G irena` as the source of truth. The earlier evidence below is historical.
@@ -526,15 +536,11 @@ mutate the public edge or certificate owner.
 
 ## Enable server ledger authority
 
-The identical-source recovery pair is current and previous. Both original Old
-profiles now persist compiled marker `104102` with their exact 438-row snapshots;
-the owner waived the remaining manual native-control/foreground check. The
-separate John Cometa Web profile does not substitute for original-device import.
-Activation was authorized but stopped safely at the WAL backup verification
-described above. Its separate owner review exception is now explicit: release the
-verified operator fix through the normal immutable lifecycle, then retry the guarded command.
-Preserve normal first import from each original device. Neither the review
-exception nor the manual check waiver proves two-profile server-ledger acceptance.
+This one-way transition has completed on the final identical-source pair. Both original
+Old snapshots were imported normally, once each, after observing compiled marker `181102`.
+John Web is a third independent profile, not a substitute for either original-device import.
+The commands below document the guarded operator interface; do not repeat activation as a
+routine restart and never attempt to return the live database to local authority.
 
 ```bash
 sudo /srv/cometa-bank/current/deploy/standalone/scripts/release.sh ledger-mode status
@@ -555,28 +561,28 @@ gate never reverses authority. Re-running `server --apply` records a durable
 reconciliation event, restarts the bot, and repeats the gates without mutating
 ledger data.
 
-## Acceptance
+## Acceptance evidence and client boundary
 
-Server authority is accepted only after two real Telegram profiles prove:
+The live server checks now cover:
 
-- isolated canonical snapshots and histories;
+- three isolated canonical snapshots: one real Web writer and two unchanged original profiles;
 - one-off income and expense, including overdraft rejection;
 - monthly recurrence with UTC backfill and future pause behavior;
 - add, adjust, close, and restore account flows;
 - restart and B-to-A-to-B persistence;
-- unchanged device-local web demo data.
+- preservation of the original device snapshots and the separate standalone web boundary.
 
 The owner explicitly authorized mock-bot QA in the own Nikita and MetaFlexer
-profiles, including messages, callbacks and screenshots. Do not request blanket
-approval again for each such step; unrelated external actions are outside that
-authorization. Add exactly three sanitized real Telegram captures to the
-root README only after these journeys pass. Browser emulation does not replace
-Android and iOS Telegram WebView acceptance.
+profiles, including messages, callbacks and screenshots, and logged into the separate
+John Web profile for real-client QA. Do not request blanket approval again for each
+such step; unrelated external actions are outside that authorization. The owner waived
+remaining manual native-control/foreground checks. Native inline callbacks remain
+inaccessible to automation, so two completed native write journeys are not claimed.
+Browser emulation does not replace Android and iOS Telegram WebView acceptance.
 
-The two current local showcase visuals use actual web screenshots and an
-explicitly illustrative Telegram preview with exact bot-engine copy. The preview
-is not a native Telegram capture or acceptance evidence. Keep that label and the
-provenance in `docs/assets/showcase/README.md` until real-client journeys are captured.
+The root README now contains actual app screenshots and three real Telegram Web
+captures in one row. Their journeys passed in the live John profile; they are not
+Android/iOS screenshots. Provenance is in `docs/assets/showcase/README.md`.
 
 The same-host SQLite backup is not disaster recovery. Encrypted offsite backup,
 retention monitoring, and an epoch-rotating restore drill are deferred. A later

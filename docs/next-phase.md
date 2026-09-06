@@ -1,62 +1,29 @@
 # Cometa — resume point and next phase
 
-Date: 2026-09-07; timestamps below are September 6 UTC. Current B `20260906T173602Z`, previous
-A `20260906T173601Z`, both source `ef9a960`, fully prepared/activated and healthy (A `17:45:07Z`,
-B `17:46:54Z`). CI `34049087351` passed 815 tests. Both original Old profiles actually reloaded
-through Escape → main-window Open Cometa: compiled `173602`, 438 rows each, exact tx hashes retained.
-The `18:04Z` server attempt passed WAL compatibility but stopped before mode/restart/import:
-the shell stripped SQL single quotes from embedded Node eval (`WHERE type = table`, syntax error).
-Mode remains LOCAL, imports 0, web/bot healthy. The two-line bound-parameter operator fix and
-real Bash-parsed verifier/switch regression pass focused checks; full 815 verify passed and the
-compiling exact-SQL-quoting mutant was killed.
-Activation is blocked pending verified fix and fresh immutable packaging/deploy. Chat flows remain inactive.
-The `14:37:32Z` server-mode attempt failed before mode switch/restart: a read-only single-file WAL
-backup could not create SQLite sidecars (code 14). The retained root `0600` backup
-`/srv/cometa-bank/backups/20260906T143732Z-before-ledger-mode-server.sqlite` passes `quick_check`
-and remains LOCAL. The deployed `ef9a960` release-script/regression fix normalizes only disposable `.compat`
-to DELETE, never live DB or durable backup; 815 tests, compiling mutant and both existing-image
-read-only Docker probes pass. The owner explicitly waived Opus for this existing WAL fix and
-authorized scoped completion; this is separate from the earlier `774f0ae` waiver. The retry in
-`/private/tmp/claude-paired-review-wal-backup-retry-20260906/attempt.md` produced no report and was
-stopped by the operator after ten minutes, not clean or a reconfirmed organization-access error.
-The WAL fix is deployed in healthy A173601/B173602 without another Opus attempt; the later SQL
-quoting failure still blocks server activation. The earlier recovery review produced no report because the organization disabled Claude Code
-access. The owner explicitly waived missing review only for emergency recovery source `774f0ae`.
-That narrow exception closes its deploy gate, not a clean review or a future-change waiver.
-The earlier failed B `095602` activation and unhealthy rollback A `095601` are incident history.
-Earlier candidate `2897de5` retains
-the prior lifecycle/import fixes and fixes v19's terminal cold-session guard with a red/green
-compiling mutant. Full `pnpm verify` passed: 799 tests (577 web + 222 bot). Immutable browser
-verification passed 5 scenarios / 19 checks; report: `/private/tmp/cometa-foreground-browser-2897de5-4ZzXID/report.json`.
-V19's continuous-progress visual preference was rejected after unchanged Chrome geometry/focus
-and an explicit CLAUDE invariant. These checks cover the source of the failed release pair.
-Original v20 did not run because of session quota. Exact Opus 5 retry finished at `10:18Z`:
-`clean`, zero findings, resolved source `2897de5`. Evidence is in
-`/private/tmp/claude-paired-review-final-20260906-v20-retry/report.json` and `meta.json`.
-The 9 signed checks passed again at `10:05Z`; live health and LOCAL/zero imports were reconfirmed
-at `10:08Z`. Final packages `20260906T095601Z`/`20260906T095602Z` were uploaded at `10:19Z`;
-local/remote checksums, extracted source parity and strict preflights passed before the failed B
-activation and unhealthy rollback A. Public visuals are in `51a2eb0`; latest Linux CI for `774f0ae`
-passed at `12:16:08Z`, run `34032518573`. Both original Old profiles reached compiled `104102` at
-`14:36:25Z`; parity at `14:56:22Z` reconfirmed unchanged 438-row transaction/balance hashes, LOCAL,
-canonical false and zero imports. The owner waived remaining manual native button/foreground
-acceptance; this is not a tested pass. Real Telegram Web John Cometa independently completed
-English→KZT→ready→Open Cometa→Telegram consent→embedded Mini App on compiled `104102`, with
-437 rows/four accounts and no reset or mutation. At `12:58Z` ChatGPT search returned nine results
-including original Pending, Received filter returned zero, RU→English and primary KZT→USD→KZT
-passed with display-only currency changes. Exact transaction/account hashes stayed unchanged;
-`700000 KZT` transfer was blocked with shortfall `84040.43`, no submit. Foreground/reopen passed:
-draft `123 KZT` survived tab switch/back, dynamic native MainButton was enabled, native Back closed
-the sheet, and close → `/help` (four LOCAL commands) → new Open Cometa button reopened the app.
-Final proof at `13:03:48Z` retained identical hashes, 437 rows/four accounts, English/KZT/compiled
-104102/LOCAL. Distinct John Web QA and Old final-build marker/parity are complete; phone and
-server-mode gates remain, with manual native button/foreground scope waived rather than tested.
-The milestone is not accepted.
+Date: 2026-09-07; timestamps are September 6 UTC. Current B `20260906T181102Z`, previous A
+`20260906T181101Z`, both source `bd435661abea6889aef59cb9e2ab77298fd4ce8d`; CI `34050857794`
+passed 815 tests. Final `pnpm verify` passed at `19:00Z`: 577 web + 238 bot = 815, lint/CSS/deploy
+harness/typecheck/build. A prepared/activated `18:13:06Z`/`18:15:52Z`; B `18:14:06Z`/`18:17:35Z`.
+Guarded server activation passed at `18:20:35Z`, durable marker `18:19:32Z`, ordinary 31-second
+health and inner/outer TLS/API gates green. Backup is root-only `0600`:
+`/srv/cometa-bank/backups/20260906T181909Z-before-ledger-mode-server.sqlite`.
+Telegram is now SERVER-authoritative; standalone web remains local.
 
-The deployed source passed 763 tests, 10 local web-browser checks, 9 synthetic signed real-backend
-checks and clean narrow Opus v13. A separate production browser pass covered 10 checks. These
-results are historical evidence, not the final candidate review or Android/iOS acceptance. Exact evidence belongs
-in `docs/handoff.md`; architecture remains canonical in `docs/spec.md`.
+Both original Old profiles normally reopened/imported once: exactly 438 preserved rows each,
+revision 1, import 1, no other operations. Real John Telegram Web bot journeys passed income,
+expense, monthly backfill/pause and account add/adjust/close/restore; an overdraft attempt changed
+none of the three canonical states. Both original states stayed byte-identical throughout.
+John ends at revision 11, 444 rows, five accounts (four active/one closed), one paused rule;
+the original 437-row prefix remains intact. Keep these QA rows/account/rule; do not reset them.
+
+Guarded B→A→B rollback passed at `18:53:18Z`/`18:56:24Z`; all three canonical states were exactly
+unchanged at `18:56:45Z`, SERVER throughout, no DB restore. Real README visuals are complete and
+visually inspected. Proven real QA is one writer plus two unchanged canonical readers. Native Old inline callbacks
+remain automation-blocked; owner waiver is not two native write journeys or Android/iOS acceptance.
+A missing monthly preview during WebSocket 1006 recovered through a fresh normal wizard; do not
+label its cause a confirmed code defect. Historical deploy failures and detailed evidence stay in
+the existing audit Revision 33. The owner explicitly requested no Opus for this completion;
+do not start another review attempt or improvement cycle.
 
 ## Preserved baseline
 
@@ -66,7 +33,7 @@ in `docs/handoff.md`; architecture remains canonical in `docs/spec.md`.
   USD economics. Do not replace these datasets without an explicit owner decision.
 - The selected onboarding currency creates the fixture once. Later primary-currency changes affect
   reporting only; reset rebuilds the same fixture.
-- Web stays device-local. After the guarded activation, Telegram uses one SQLite-backed canonical
+- Web stays device-local. Since the guarded activation, Telegram uses one SQLite-backed canonical
   mock ledger per verified Telegram ID, shared by the bot and Mini App through typed commands.
 - The product remains fictional. It has no real money, payment rails, bank connection, KYC or AML.
 - Production origin is Irena. Hostinger remains the external TLS rollback origin; Julia is unrelated
@@ -74,33 +41,37 @@ in `docs/handoff.md`; architecture remains canonical in `docs/spec.md`.
   not the old `metaflexer` login.
 - Caddy is the only public listener/TLS owner on Irena. Docker web is loopback-only on `8080/8443`;
   the retained `8443` Nginx TLS hop is temporary bridge compatibility. Legacy Certbot units stay
-  disabled/inactive. Recovery A104101/B104102 is source-clean and healthy; old patched C/D releases
-  are historical migration evidence, not active rollback slots. The new data-persistence rollback
-  rehearsal remains pending.
+  disabled/inactive. Active A181101/B181102 is source-clean and healthy; old patched C/D releases
+  are historical migration evidence, not active rollback slots. Current B181102/A181101 passed the
+  full guarded B→A→B rehearsal with exact preservation of all three canonical states.
 - Production uses the exact versioned Docker daemon policy and Caddy's caddy-owned Unix admin
   socket, mode `0200`, with `persist_config off` and `h1/h2`. Trusted inner TLS and real-IP gates,
   key-only SSH, UFW `22/80/443`, `jq 1.8.1` and TLS/API gates were verified. Recovery's ordinary
   31-second health/TLS/API gates passed; polling is ready without restarts or repeated profile 429.
   Root-only same-VPS WAL-safe backups are `20260906T122958Z-before-20260906T104101Z.sqlite` and
   `20260906T123205Z-before-20260906T104102Z.sqlite` under `/srv/cometa-bank/backups`.
-- Both real Telegram Old profiles, Nikita and MetaFlexer, persisted compiled marker B. Nikita's
-  438 existing rows were preserved exactly; MetaFlexer's 437 became 438 only through interest.
+- Both original Old profiles, Nikita and MetaFlexer, normally reopened and imported once. Their
+  exact 438-row canonical states are revision 1/import 1/no other operations, unchanged by John writes.
   Do not reset these snapshots or identify either profile as John Cometa from a display name.
 - Native desktop automation still hits `-10005`/`AXError.notImplemented`; the Browser plugin has no
   bindings. At the owner's explicit request, headed Chrome uses a fresh isolated profile at
   `/private/tmp/cometa-telegram-web-qa.Mtuner/profile`, QR-authenticated by the owner. Real Web
   onboarding completed in John Cometa. Its namespace hash `b8c452f98d` is distinct from Old Nikita
   `5a39b27c62` and MetaFlexer `a98ab714e4`; do not conflate the three profiles. John has compiled
-  `104102`, 437 rows/four accounts, no resets/mutations; both Old 438-row hashes remained unchanged
-  on marker `104102` at `14:56:22Z`. Distinct John Web foreground/reopen and native-control QA passed;
+  `104102`, 437 rows/four accounts at the historical local checkpoint. John now has 444 canonical
+  rows/revision 11 after real bot writes; the original 437-row prefix and both Old states are intact.
+  Distinct John Web foreground/reopen and native-control QA passed;
   remaining manual native button/foreground checks were owner-waived, not tested. Phone gates remain.
-- Two showcase compositions are published in `51a2eb0`: actual web screenshots and an explicitly illustrative
-  Telegram preview using exact bot-engine copy, not native captures. Their provenance is in
-  `docs/assets/showcase/README.md`; neither replaces real-profile acceptance.
+- `telegram-showcase.png` is now a real 1600×1040 composition of three unmodified 390×650 Telegram
+  Web captures in one row: dashboard/expense picker, paused Spotify, accounts/Current detail.
+  Captured on John B181102 after rollback and visually inspected without IDs/secrets/other chats;
+  source PNGs, `telegram.html` and provenance are retained. Old engine-preview JSON is historical only.
+  `app-showcase.png` remains the genuine 1600×1240 baseline Home/FX/History composition. Neither
+  these captures nor the owner waiver establish two native write journeys or Android/iOS acceptance.
 - `nikitacometa/mock-bank-app` is public by owner decision. Exact KZT dates, merchants and amounts
   remain fingerprintable despite the removal of direct PII.
 
-## Authority contract (deployed, server mode disabled)
+## Authority contract (live SERVER mode)
 
 - Eight deterministic fixtures: `KZT`, `THB`, `VND`, `RUB`, `USD`, `EUR`, `IDR`, `GEL`.
 - First valid device import is create-if-absent and canonical. A different second-device snapshot
@@ -167,34 +138,20 @@ in `docs/handoff.md`; architecture remains canonical in `docs/spec.md`.
 
 ## Resume order
 
-1. Read `CLAUDE.md`, `docs/handoff.md`, this file and `deploy/standalone/README.md`.
-2. Inspect `git status` and preserve unrelated changes. Recovery `774f0ae` is deployed under the
-   explicit owner emergency waiver for its missing Opus review only. The owner has now separately
-   waived Opus for the existing `.compat` WAL fix and authorized scoped completion. Its silent retry
-   was operator-stopped after ten minutes without a report, not clean or a new access-error verdict.
-   Do not start another Opus attempt or improvement cycle; proceed with this tested fix only.
-3. Recheck Irena, current/previous images, containers/restarts, `ledger_mode=local`, Caddy semantics,
-   exact loopback bindings, quiesced renewal units, DNS and TLS/API smoke. The Docker/Caddy bridge
-   is already installed; do not rerun its host-wide migration as the next normal release step.
-4. Keep healthy A173601/B173602 on `ef9a960` while the new SQL-quoting operator/harness fix is
-   completed and verified. Package/deploy that fix through the normal immutable release lifecycle;
-   never hot-patch the current release or repeat the host migration. No new Opus attempt is needed.
-   Older `075300`/`075301`, `092401`/`092402`, `094101`/`094102` and incident `095601`/`095602`
-   are not the active rollback pair. Preserve the DB/token and LOCAL mode during remaining QA.
-5. Preserve both Old actual-reopen `173602`/438-row exact-hash proofs and completed distinct John Web QA.
-   The owner explicitly waived remaining manual native button/foreground acceptance; do not label
-   that scope tested. Do not conflate namespaces or reset snapshots to manufacture acceptance.
-6. After the new SQL-quoting fix is deployed and verified, retry the one-way switch. The latest
-   attempt stopped safely before mode/restart/import; do not call it activated. Only after success import each
-   preserved device snapshot once. Prove one-off, recurrence/backfill, overdraft rejection,
-   add/adjust/close/restore, current→previous→current survival and cross-profile isolation. Use RU/EN
-   journeys without reseeding existing accounts to manufacture a different base currency.
-7. Capture three sanitized real Telegram screens in one README row only after the live journeys pass.
-   Until then retain the two honest showcase visuals and their explicit Telegram-preview label.
-   Browser emulation does not replace current Android/iOS Telegram acceptance.
-8. Before non-test use, rotate the exposed test bot token through the hidden-TTY installer. Then
-   decide Hostinger retirement and HSTS. Remove inner TLS/Certbot only in the separate post-bridge
-   task after two compatible rollback targets exist.
+1. Read `CLAUDE.md`, `docs/handoff.md`, this file and `deploy/standalone/README.md`; preserve dirty edits.
+2. Preserve the completed B→A→B proof: current B181102/previous A181101, exact states/revisions/
+   operations/accounts/rules across both full immutable/perimeter/31-second health/TLS/API gates.
+   SERVER is one-way; never fall back to local or repeat first imports. No DB restore was used.
+3. Preserve completed real Telegram Web captures, their unmodified source PNGs/HTML and provenance;
+   keep old illustrative JSON historical. Final 815 verify is green; no further visual generation is pending.
+4. Retain QA rows: original Old states 438 rows/revision 1/import 1, John 444 rows/revision 11,
+   QA THB account closed and monthly rule paused. Real income/expense, backfill, account lifecycle
+   and three-profile canonical isolation passed; native Old inline callbacks remain blocked.
+5. Do not add another Opus attempt or improvement cycle: the owner explicitly requested no Opus
+   for this completion. Prior access failure/cancelled retry is not a clean review.
+6. Keep Android/iOS and two-native-write-journey acceptance separate. The manual-control waiver
+   is not a test result. Rotate the exposed test token before non-test use; defer Hostinger/HSTS
+   and inner-TLS retirement until their own gates are met.
 
 ## Deferred work
 

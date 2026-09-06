@@ -20,11 +20,11 @@ Your onboarding currency chooses the initial demo. Changing the display currency
 
 ## A bank, one chat away
 
-<img src="docs/assets/showcase/telegram-showcase.png" alt="Three sanitized Telegram product previews in one row: onboarding, a monthly Spotify expense with backfill, and reversible account management" width="100%">
+<img src="docs/assets/showcase/telegram-showcase.png" alt="Three real Telegram Web screenshots in one row: adding an expense, managing a monthly Spotify entry, and account balance and closure controls" width="100%">
 
-<sub>Illustrative Telegram layout with exact replies captured from the bot engine. These are product previews, not production Telegram screenshots.</sub>
+<sub>Actual Telegram Web captures from the live bot. All balances and entries are fictional.</sub>
 
-The release candidate adds three chat flows, pending production activation:
+Three chat flows are live:
 
 - `/add` records an expense or income: account, merchant or sender, note, amount and UTC date.
 - Monthly entries can start in a past month. Preview the backfill before confirming; `/recurring` keeps the schedule manageable.
@@ -33,7 +33,7 @@ The release candidate adds three chat flows, pending production activation:
 Expenses and recurring entries use checking accounts. Savings corrections settle interest first.
 No operation can push a mock account below zero. Confirmations are retry-safe.
 
-The Mini App shares the same ledger with the bot once server authority is enabled. Each signed
+The Mini App shares the same server ledger with the bot. Each signed
 Telegram profile has its own history; the first imported device snapshot becomes canonical.
 A different existing device copy is never replaced silently. The standalone web demo stays local.
 
@@ -74,15 +74,14 @@ pnpm verify
 
 ## Release status
 
-The web demo and bot are live. Real Telegram Web onboarding and embedded Mini App launch pass
-on the current release. The recovery build passes 815 automated tests and Linux CI; existing
-demo histories remain intact.
+The web demo, Mini App and bot ledger are live. The release passes 815 automated tests and
+Linux CI. Real Telegram Web checks cover onboarding, income, expenses, monthly backfill,
+overdraft rejection and the complete account lifecycle.
 
 Both original Telegram profiles now load the current build with their 438-entry histories intact.
 Remaining manual native button/foreground checks were waived by the owner, not recorded as tested.
 
-The expanded Telegram ledger is still disabled: activation stopped at a backup-compatibility check
-before changing local mode. The owner authorized the tested fix without another Opus review;
-its deployment and server activation are not yet verified. Live bot transaction screenshots,
-two-profile server isolation and rollback checks remain pending; the chat visual above is illustrative.
-Browser emulation does not establish Android or iOS WebView acceptance.
+One real Telegram profile added entries while both existing profiles retained their exact canonical
+histories. This verifies isolation; it does not claim completed native write journeys on both accounts.
+An image rollback and return to the current release preserved all three complete server states.
+Android and iOS Telegram WebView acceptance remains a separate check.

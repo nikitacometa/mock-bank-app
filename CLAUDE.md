@@ -4,8 +4,8 @@
 demo-счетов, поддерживает восемь валют, настраиваемую основную валюту, накопительный счёт с
 процентом, live reference rates, историю, мок-карты, переводы, ручные и recurring операции.
 Обычный web хранит mock-ledger локально. Telegram реализует server-authoritative mock-ledger
-отдельно для каждого canonical Telegram ID. Двухрелизный bridge уже deployed; live mode остаётся
-`local` до проверенного explicit one-way switch (точный runtime status в handoff).
+отдельно для каждого canonical Telegram ID. Live mode — `server` после проверенного one-way
+switch 2026-09-06; обе rollback-версии поддерживают эту authority (точный status в handoff).
 Это всё ещё вымышленное демо без реальных денег и
 payment rails.
 Полная спека: `docs/spec.md`
@@ -271,8 +271,8 @@ pnpm test           # vitest
   повторяет health gates без ledger mutation. Пока mode `local`, setup и `/help` публикуют только
   `start/settings/help/privacy`. После durable final event operator restart'ит current bot, startup
   публикует server command profiles, затем обязательны 31 секунд stable health и TLS/API smoke;
-  reconciliation повторяет restart и gates. Authority-capable code deployed, но live DB пока не
-  переключён. Hostinger остаётся только static/TLS fallback и не
+  reconciliation повторяет restart и gates. Live DB переключена в `server`; возвращать её в
+  `local` или восстанавливать старую DB ради app rollback запрещено. Hostinger остаётся только static/TLS fallback и не
   может быть Telegram ledger authority. Encrypted offsite backup/restore drill отложен; локальные
   root-only SQLite backups не являются защитой от потери VPS.
 - Bot token принимается только через hidden TTY prompt и service-owned file boundary; token запрещён
