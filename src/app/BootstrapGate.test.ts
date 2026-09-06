@@ -97,6 +97,40 @@ describe('startTelegramPreferenceBootstrap', () => {
     cleanup();
   });
 
+  it('does not retry a terminal cold failure when the first SDK fingerprint appeared mid-attempt', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    let fingerprint: string | undefined = undefined;
+    let retryOnSignal: ((signal: 'online' | 'visible') => void) | undefined;
+    let rejectFirst: ((error: Error) => void) | undefined;
+    const pending = vi.fn();
+    const synchronize = vi.fn()
+      .mockImplementationOnce(() => new Promise<'applied'>((_resolve, reject) => { rejectFirst = reject; }))
+      .mockResolvedValue('applied');
+    const cleanup = startTelegramPreferenceBootstrap({
+      platform: { ...telegramPlatform(), getSessionFingerprint: () => fingerprint },
+      onReady: () => undefined, onPendingChange: pending, synchronize,
+      subscribeRetry: listener => { retryOnSignal = listener; return () => undefined; },
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    fingerprint = 'first-session-visible-to-in-flight-request';
+    rejectFirst?.(Object.assign(new Error('unsupported contract'), { retryable: false }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(pending.mock.calls).toEqual([[true], [false]]);
+    retryOnSignal?.('visible');
+    retryOnSignal?.('online');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(synchronize).toHaveBeenCalledOnce();
+    expect(pending.mock.calls).toEqual([[true], [false]]);
+    fingerprint = 'new-session-after-terminal-failure';
+    retryOnSignal?.('visible');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(synchronize).toHaveBeenCalledTimes(2);
+    expect(pending.mock.calls).toEqual([[true], [false], [true], [false]]);
+    cleanup();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('stops foreground retries after a terminal error following success but allows a new identity', async () => {
     vi.useFakeTimers();
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);

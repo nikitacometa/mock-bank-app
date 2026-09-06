@@ -240,7 +240,8 @@ export function startTelegramPreferenceBootstrap({
     if (cancelled) return;
     const fingerprint = platform.getSessionFingerprint?.();
     const identityChanged = observedFingerprint !== undefined && fingerprint !== observedFingerprint;
-    const resumeAbsentColdLaunch = !hasObservedFingerprint && fingerprint !== undefined && !attemptRunning;
+    const resumeAbsentColdLaunch = !hasObservedFingerprint && fingerprint !== undefined &&
+      !attemptRunning && (retryPending || idleRefreshAllowed);
     if (fingerprint !== undefined) hasObservedFingerprint = true;
     // First SDK availability is not an account switch. The in-flight sync
     // checks its own captured fingerprint and retries on the short cold ladder.
