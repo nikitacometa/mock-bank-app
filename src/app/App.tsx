@@ -42,34 +42,10 @@ function ActiveSheet() {
   }
 }
 
-function Shell() {
+/** Keep synchronization alive while identity quarantine temporarily hides Shell. */
+function ForegroundSynchronization() {
   const platform = usePlatform();
   const settleNow = useBankStore((s) => s.settleNow);
-  const refreshRates = useBankStore((s) => s.refreshRates);
-  const recovered = useBankStore((s) => s.recoveredFromCorruption);
-  const showToast = useUiStore((s) => s.showToast);
-  const screen = useUiStore((s) => s.screen);
-  const booted = useRef(false);
-  const recoveryNoticeShown = useRef(false);
-
-  useEffect(() => {
-    if (booted.current) return;
-    booted.current = true;
-    void settleNow();
-    const startedWithFallback = useBankStore.getState().exchangeRates.source === 'fallback';
-    void refreshRates().then((result) => {
-      if (result === 'failed' && startedWithFallback) {
-        showToast('app.ratesUnavailable');
-      }
-    });
-  }, [settleNow, refreshRates, showToast]);
-
-  useEffect(() => {
-    if (!recovered || recoveryNoticeShown.current) return;
-    recoveryNoticeShown.current = true;
-    showToast('app.dataRecovered');
-  }, [recovered, showToast]);
-
   useEffect(() => {
     let foregroundController: AbortController | null = null;
     const synchronizeForeground = () => {
@@ -110,6 +86,36 @@ function Shell() {
     };
   }, [platform, settleNow]);
 
+  return null;
+}
+
+function Shell() {
+  const settleNow = useBankStore((s) => s.settleNow);
+  const refreshRates = useBankStore((s) => s.refreshRates);
+  const recovered = useBankStore((s) => s.recoveredFromCorruption);
+  const showToast = useUiStore((s) => s.showToast);
+  const screen = useUiStore((s) => s.screen);
+  const booted = useRef(false);
+  const recoveryNoticeShown = useRef(false);
+
+  useEffect(() => {
+    if (booted.current) return;
+    booted.current = true;
+    void settleNow();
+    const startedWithFallback = useBankStore.getState().exchangeRates.source === 'fallback';
+    void refreshRates().then((result) => {
+      if (result === 'failed' && startedWithFallback) {
+        showToast('app.ratesUnavailable');
+      }
+    });
+  }, [settleNow, refreshRates, showToast]);
+
+  useEffect(() => {
+    if (!recovered || recoveryNoticeShown.current) return;
+    recoveryNoticeShown.current = true;
+    showToast('app.dataRecovered');
+  }, [recovered, showToast]);
+
   return (
     <div className="app-shell mx-auto max-w-[430px]" style={{ minHeight: 'var(--app-height)' }}>
       <main>
@@ -137,6 +143,7 @@ export function App() {
       }}
     >
       <PlatformProvider>
+        <ForegroundSynchronization />
         <BootstrapGate>
           <Shell />
         </BootstrapGate>
