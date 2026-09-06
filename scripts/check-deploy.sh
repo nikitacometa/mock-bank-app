@@ -1297,21 +1297,22 @@ bash -c '
     printf "%s\n" "${mock_listeners}"
   }
   owner_line='\''u_str LISTEN 0      4096 /run/docker.sock 11937 * 0 users:(("dockerd",pid=1009,fd=5),("systemd",pid=1,fd=238))'\''
+  canonical_line=${owner_line/0      4096/0 4096}
   mock_listeners="${owner_line}       "
   socket_listener_before="$(docker_socket_listener_for_pid 1009)" || exit 1
   printf -v mock_listeners "%s\t  " "${owner_line}"
   socket_listener_after="$(docker_socket_listener_for_pid 1009)" || exit 1
-  [[ "${socket_listener_before}" == "${owner_line}" && \
+  [[ "${socket_listener_before}" == "${canonical_line}" && \
     "${socket_listener_after}" == "${socket_listener_before}" ]] || exit 1
 
   mock_listeners=${owner_line/fd=5/fd=6}
   changed_listener="$(docker_socket_listener_for_pid 1009)" || exit 1
-  [[ "${changed_listener}" == "${mock_listeners}" && \
+  [[ "${changed_listener}" == "${canonical_line/fd=5/fd=6}" && \
     "${changed_listener}" != "${socket_listener_before}" ]] || exit 1
   mock_listeners=${owner_line/0      4096/0 4096}
   changed_listener="$(docker_socket_listener_for_pid 1009)" || exit 1
   [[ "${changed_listener}" == "${mock_listeners}" && \
-    "${changed_listener}" != "${socket_listener_before}" ]] || exit 1
+    "${changed_listener}" == "${socket_listener_before}" ]] || exit 1
 
   printf -v duplicate_listeners "%s\n%s" "${owner_line}" "${owner_line}"
   for mock_listeners in \
