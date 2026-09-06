@@ -162,6 +162,8 @@ pnpm test           # vitest
   copy. Keep Retry focusable with `aria-disabled` and a click guard while work is pending;
   do not alternate the card with the splash or show settled-failure copy during import. Settled failures expose
   recovery, while an explicit server-copy choice remains available.
+  Progress describes an in-flight request. Between bounded automatic attempts, show the last
+  outcome and allow manual Retry; a scheduled delay must not prolong the blocking splash deadline.
 - SDK: maintained `@tma.js/sdk-react` 3.0.23 (`@tma.js/sdk` 3.3.0). Legacy
   `@telegram-apps/*` packages запрещено возвращать: они unsupported. Реальный
   BotFather binding готов, signed macOS Telegram WebView pass пройден; полный bot onboarding и
