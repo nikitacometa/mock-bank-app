@@ -14,16 +14,7 @@ import { AccountDetailSheet } from '@/ui/screens/sheets/AccountDetailSheet';
 import { SettingsSheet } from '@/ui/screens/sheets/SettingsSheet';
 import { useI18n } from '@/i18n';
 import { BootstrapGate } from './BootstrapGate';
-import {
-  synchronizeLaunchPreferences,
-  type LaunchPreferenceSyncResult,
-} from './launchPreferences';
-
-export function shouldSettleAfterTelegramForegroundSync(
-  result: LaunchPreferenceSyncResult,
-): boolean {
-  return result === 'current' || result === 'applied';
-}
+export { shouldSettleAfterTelegramForegroundSync } from './launchPreferences';
 
 function ActiveSheet() {
   const sheet = useUiStore((s) => s.sheet);
@@ -42,34 +33,14 @@ function ActiveSheet() {
   }
 }
 
-/** Keep synchronization alive while identity quarantine temporarily hides Shell. */
-function ForegroundSynchronization() {
+/** Telegram synchronization belongs to the persistent, budgeted BootstrapGate. */
+function WebForegroundSettlement() {
   const platform = usePlatform();
   const settleNow = useBankStore((s) => s.settleNow);
   useEffect(() => {
-    let foregroundController: AbortController | null = null;
+    if (platform.isTelegram) return;
     const synchronizeForeground = () => {
-      if (!platform.isTelegram) {
-        void settleNow();
-        return;
-      }
-      foregroundController?.abort();
-      const controller = new AbortController();
-      foregroundController = controller;
-      void synchronizeLaunchPreferences(platform, controller.signal)
-        .then((result) => {
-          if (
-            !controller.signal.aborted &&
-            shouldSettleAfterTelegramForegroundSync(result)
-          ) {
-            void settleNow();
-          }
-        })
-        .catch((error: unknown) => {
-          if (controller.signal.aborted) return;
-          const message = error instanceof Error ? error.message : 'unknown sync error';
-          console.warn(`[telegram] foreground bank sync failed: ${message}`);
-        });
+      void settleNow();
     };
     const onVisible = () => {
       if (document.visibilityState === 'visible') synchronizeForeground();
@@ -82,7 +53,6 @@ function ForegroundSynchronization() {
     return () => {
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('pageshow', onPageShow);
-      foregroundController?.abort();
     };
   }, [platform, settleNow]);
 
@@ -143,7 +113,7 @@ export function App() {
       }}
     >
       <PlatformProvider>
-        <ForegroundSynchronization />
+        <WebForegroundSettlement />
         <BootstrapGate>
           <Shell />
         </BootstrapGate>

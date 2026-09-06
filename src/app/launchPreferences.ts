@@ -59,6 +59,24 @@ const defaultTarget: LaunchPreferenceTarget = {
 
 export type LaunchPreferenceSyncResult = 'absent' | 'current' | 'applied' | 'retry';
 
+export function shouldSettleAfterTelegramForegroundSync(result: LaunchPreferenceSyncResult): boolean {
+  return result === 'current' || result === 'applied';
+}
+
+/** Hide a changed host identity immediately, even while HTTP retries are cooling down. */
+export async function quarantineTelegramLaunchSession(
+  platform: PlatformAdapter,
+  signal: AbortSignal,
+): Promise<void> {
+  const epoch = ++nextLaunchSynchronizationEpoch;
+  const fingerprint = platform.getSessionFingerprint?.();
+  await defaultTarget.isolateBankSession(undefined, signal);
+  const current = isolatedSessionBoundaries.get(platform);
+  if (current === undefined || current.epoch < epoch) {
+    isolatedSessionBoundaries.set(platform, { epoch, fingerprint });
+  }
+}
+
 export async function synchronizeLaunchPreferences(
   platform: PlatformAdapter,
   signal: AbortSignal,

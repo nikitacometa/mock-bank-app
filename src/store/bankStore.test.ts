@@ -460,6 +460,132 @@ describe('useBankStore server-authoritative Telegram ledger', () => {
     );
   });
 
+  it('closes local writes before a foreground import snapshots the ledger', async () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+    });
+    const { useBankStore, ServerLedgerReadOnlyError } = await importTelegramBankStore();
+    await useBankStore.getState().activateVerifiedTelegramSession('41');
+    await useBankStore.getState().applyLaunchPreferences({
+      version: 1, revisionEpoch: '9'.repeat(32), revision: 1, locale: 'en',
+      primaryCurrency: 'KZT', displayName: 'Ada', telegramId: '41',
+    });
+    expect(useBankStore.getState().ledgerMode).toBe('local');
+    const before = exactBankState(useBankStore.getState());
+    const persisted = storage.get('cometa.bank.tma.user.41');
+    const response = deferred<BankImportResponse>();
+    const importBankState = vi.fn(() => response.promise);
+    const synchronization = useBankStore.getState().synchronizeTelegramBank(
+      '41', { contractVersion: 1, mode: 'import_required', telegramId: '41' },
+      telegramPlatform(undefined, importBankState), new AbortController().signal,
+    );
+    await vi.waitFor(() => expect(importBankState).toHaveBeenCalledOnce());
+    expect(storage.get('cometa.bank.tma.user.41.ledger-authority-mode')).toContain('server');
+    expect(useBankStore.getState().ledgerMode).toBe('read_only');
+    await expect(useBankStore.getState().transfer({
+      fromAccountId: CHECKING_ID, toAccountId: 'acc_savings',
+      amountMinor: 100, clientTransferId: 'ct_during_import',
+    })).rejects.toBeInstanceOf(ServerLedgerReadOnlyError);
+    expect(storage.get('cometa.bank.tma.user.41')).toBe(persisted);
+    response.resolve(importResponse(before, 1));
+    await expect(synchronization).resolves.toBe('applied');
+    expect(exactBankState(useBankStore.getState())).toEqual(before);
+    expect(useBankStore.getState().ledgerMode).toBe('server');
+  });
+
+  it('imports the latest durable ledger when a prior tab transfer has not reached memory', async () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+    });
+    const { useBankStore } = await importTelegramBankStore();
+    await useBankStore.getState().activateVerifiedTelegramSession('41');
+    await useBankStore.getState().applyLaunchPreferences({
+      version: 1, revisionEpoch: '9'.repeat(32), revision: 1, locale: 'en',
+      primaryCurrency: 'KZT', displayName: 'Ada', telegramId: '41',
+    });
+    // Reopening an existing device snapshot arms the second-device confirmation boundary.
+    await useBankStore.getState().activateVerifiedTelegramSession('41');
+    const before = exactBankState(useBankStore.getState());
+    const transferred = applyTransfer(before, {
+      fromAccountId: CHECKING_ID, toAccountId: 'acc_savings', amountMinor: 100,
+      clientTransferId: 'ct_prior_tab_before_import', nowISO: new Date().toISOString(),
+    });
+    if (!transferred.ok) throw new Error('Expected the prior-tab transfer to succeed');
+    storage.set('cometa.bank.tma.user.41', JSON.stringify({
+      schemaVersion: SCHEMA_VERSION, state: transferred.state,
+    }));
+    expect(useBankStore.getState().transactions).toEqual(before.transactions);
+    const importBankState: PlatformAdapter['importBankState'] = vi.fn(async request =>
+      importResponse(request.state, 1));
+    await useBankStore.getState().synchronizeTelegramBank(
+      '41', { contractVersion: 1, mode: 'import_required', telegramId: '41' },
+      telegramPlatform(undefined, importBankState), new AbortController().signal,
+    );
+    expect(importBankState).toHaveBeenCalledWith(
+      expect.objectContaining({ state: transferred.state }), expect.any(AbortSignal),
+    );
+    expect(exactBankState(useBankStore.getState())).toEqual(transferred.state);
+    expect(balanceOf(useBankStore.getState(), CHECKING_ID)).toBe(balanceOf(before, CHECKING_ID) - 100);
+  });
+
+  it.each(['transfer', 'currency', 'card', 'reset', 'interest', 'rates'] as const)(
+    'rechecks sticky authority inside a queued local %s mutation', async (kind) => {
+      const storage = new Map<string, string>();
+      vi.stubGlobal('localStorage', {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+      });
+      const { useBankStore, ServerLedgerReadOnlyError } = await importTelegramBankStore();
+      await useBankStore.getState().activateVerifiedTelegramSession('41');
+      await useBankStore.getState().applyLaunchPreferences({
+        version: 1, revisionEpoch: '9'.repeat(32), revision: 1, locale: 'en',
+        primaryCurrency: 'KZT', displayName: 'Ada', telegramId: '41',
+      });
+      const before = exactBankState(useBankStore.getState());
+      const persisted = storage.get('cometa.bank.tma.user.41');
+      const releaseLock = deferred<void>();
+      const enteredLock = deferred<void>();
+      vi.stubGlobal('navigator', { locks: {
+        request: async (_name: string, _options: LockOptions, callback: () => unknown) => {
+          enteredLock.resolve();
+          await releaseLock.promise;
+          return callback();
+        },
+      } });
+      vi.stubGlobal('fetch', vi.fn(async () => okResponse()));
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const store = useBankStore.getState();
+      const mutation = kind === 'transfer'
+        ? store.transfer({ fromAccountId: CHECKING_ID, toAccountId: 'acc_savings',
+            amountMinor: 100, clientTransferId: 'ct_queued_before_authority' })
+        : kind === 'currency' ? store.setPrimaryCurrency('USD')
+        : kind === 'card' ? store.toggleCardFreeze(before.cards[0].id)
+        : kind === 'reset' ? store.resetDemo()
+        : kind === 'interest' ? store.settleNow()
+        : store.refreshRates(true);
+      const outcome = mutation.then(value => ({ value }), (error: unknown) => ({ error }));
+      await enteredLock.promise;
+      // Another document can publish this marker while this callback waits for its lock.
+      const { markStickyServerLedgerMode } = await import('@/platform/ledgerAuthorityReceipt');
+      expect(markStickyServerLedgerMode('41')).toBe(true);
+      releaseLock.resolve();
+      const result = await outcome;
+      if (kind === 'interest') expect(result).toEqual({ value: undefined });
+      else if (kind === 'rates') expect(result).toEqual({ value: 'failed' });
+      else {
+        expect('error' in result).toBe(true);
+        if ('error' in result) expect(result.error).toBeInstanceOf(ServerLedgerReadOnlyError);
+      }
+      expect(exactBankState(useBankStore.getState())).toEqual(before);
+      expect(storage.get('cometa.bank.tma.user.41')).toBe(persisted);
+      expect(useBankStore.getState().ledgerMode).toBe('read_only');
+    },
+  );
+
   it('adopts out-of-order command responses monotonically and rejects the retired epoch', async () => {
     const storage = new Map<string, string>();
     vi.stubGlobal('localStorage', {

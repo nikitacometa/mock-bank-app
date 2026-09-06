@@ -6,7 +6,12 @@ import { useUiStore } from '@/store/uiStore';
 import { useBankStore } from '@/store/bankStore';
 import { CometMark } from '@/ui/icons';
 import { APP_NAME } from './config';
-import { synchronizeLaunchPreferences } from './launchPreferences';
+import {
+  quarantineTelegramLaunchSession,
+  shouldSettleAfterTelegramForegroundSync,
+  synchronizeLaunchPreferences,
+  type LaunchPreferenceSyncResult,
+} from './launchPreferences';
 
 const BOOTSTRAP_TIMEOUT_MS = 4_500;
 const BOOTSTRAP_ATTEMPT_TIMEOUT_MS = 4_500;
@@ -21,6 +26,7 @@ type TelegramBootstrapRetryListener = (signal: TelegramBootstrapRetrySignal) => 
 interface TelegramBootstrapOptions {
   readonly platform: PlatformAdapter;
   readonly onReady: VoidFunction;
+  readonly onSynchronized?: (result: LaunchPreferenceSyncResult, signal: AbortSignal) => void;
   readonly synchronize?: typeof synchronizeLaunchPreferences;
   readonly timeoutMs?: number;
   readonly attemptTimeoutMs?: number;
@@ -43,10 +49,15 @@ function subscribeTelegramBootstrapRetry(listener: TelegramBootstrapRetryListene
   const onVisibilityChange = () => {
     if (document.visibilityState === 'visible') listener('visible');
   };
+  const onPageShow = (event: Event) => {
+    if ('persisted' in event && event.persisted === true) listener('visible');
+  };
   if (hasGlobalEvents) globalThis.addEventListener('online', onOnline);
+  if (hasGlobalEvents) globalThis.addEventListener('pageshow', onPageShow);
   if (hasDocument) document.addEventListener('visibilitychange', onVisibilityChange);
   return () => {
     if (hasGlobalEvents) globalThis.removeEventListener('online', onOnline);
+    if (hasGlobalEvents) globalThis.removeEventListener('pageshow', onPageShow);
     if (hasDocument) document.removeEventListener('visibilitychange', onVisibilityChange);
   };
 }
@@ -54,6 +65,7 @@ function subscribeTelegramBootstrapRetry(listener: TelegramBootstrapRetryListene
 export function startTelegramPreferenceBootstrap({
   platform,
   onReady,
+  onSynchronized,
   synchronize = synchronizeLaunchPreferences,
   timeoutMs = BOOTSTRAP_TIMEOUT_MS,
   attemptTimeoutMs = BOOTSTRAP_ATTEMPT_TIMEOUT_MS,
@@ -72,6 +84,10 @@ export function startTelegramPreferenceBootstrap({
   let externalRetryId: ReturnType<typeof globalThis.setTimeout> | undefined;
   let activeTimeoutId: ReturnType<typeof globalThis.setTimeout> | undefined;
   let activeController: AbortController | undefined;
+  let cancelActiveAttempt: VoidFunction | undefined;
+  let boundaryController: AbortController | undefined;
+  let observedFingerprint = platform.getSessionFingerprint?.();
+  let idleRefreshAllowed = false;
   let retryPending = false;
   let attemptRunning = false;
   let externalSignalPending = false;
@@ -115,33 +131,40 @@ export function startTelegramPreferenceBootstrap({
   const runAttempt = () => {
     retryId = undefined;
     const startedAt = Date.now();
-    if (cancelled || !hasAttemptBudget(startedAt)) return;
+    if (cancelled || attemptRunning || !hasAttemptBudget(startedAt)) return;
     retryPending = false;
     attemptRunning = true;
     attemptStarts.push(startedAt);
     lastAttemptAt = startedAt;
+    activeController?.abort();
     const controller = new AbortController();
     activeController = controller;
+    observedFingerprint = platform.getSessionFingerprint?.();
+    const isForeground = finished;
     let settled = false;
-    const settle = (retry: boolean) => {
+    const settle = (retry: boolean, automaticRetry = true) => {
       if (settled) return;
       settled = true;
       attemptRunning = false;
       globalThis.clearTimeout(timeoutId);
       if (activeTimeoutId === timeoutId) activeTimeoutId = undefined;
-      if (activeController === controller) activeController = undefined;
+      cancelActiveAttempt = undefined;
       retryPending = retry;
       if (!retry) {
         externalSignalPending = false;
         release();
         return;
       }
-      if (scheduleRetry()) {
+      if (automaticRetry && scheduleRetry()) {
         // The already-scheduled attempt observes the recovered connection.
         externalSignalPending = false;
       } else if (externalSignalPending) {
         consumeExternalSignal();
       }
+    };
+    cancelActiveAttempt = () => {
+      controller.abort();
+      settle(true, false);
     };
     const timeoutId = globalThis.setTimeout(() => {
       controller.abort();
@@ -159,7 +182,9 @@ export function startTelegramPreferenceBootstrap({
         // A fulfilled synchronization has crossed the isolation boundary even
         // when a test double omits the explicit callback.
         markIdentityIsolated();
+        idleRefreshAllowed = result !== 'retry';
         settle(result === 'retry');
+        if (isForeground) onSynchronized?.(result, controller.signal);
       },
       (error: unknown) => {
         if (settled || cancelled) return;
@@ -204,11 +229,31 @@ export function startTelegramPreferenceBootstrap({
 
   const retryOnExternalSignal: TelegramBootstrapRetryListener = () => {
     if (cancelled) return;
+    const fingerprint = platform.getSessionFingerprint?.();
+    const identityChanged = fingerprint !== observedFingerprint;
+    if (identityChanged) {
+      // Quarantine is not an HTTP retry and must never wait for its cooldown.
+      // The store hides the old namespace synchronously before the first await.
+      observedFingerprint = fingerprint;
+      boundaryController?.abort();
+      boundaryController = new AbortController();
+      const signal = boundaryController.signal;
+      void quarantineTelegramLaunchSession(platform, signal).catch((error: unknown) => {
+        if (signal.aborted) return;
+        const message = error instanceof Error ? error.message : 'unknown identity error';
+        console.warn(`[telegram] foreground identity isolation failed: ${message}`);
+      });
+      externalSignalPending = true;
+      idleRefreshAllowed = true;
+      activeController?.abort();
+      cancelActiveAttempt?.();
+    }
     if (attemptRunning) {
       externalSignalPending = true;
       return;
     }
-    if (!retryPending) return;
+    if (!retryPending && !idleRefreshAllowed) return;
+    retryPending = true;
     externalSignalPending = true;
     if (retryId !== undefined) {
       // The pending ladder attempt is itself the recovery probe.
@@ -228,6 +273,7 @@ export function startTelegramPreferenceBootstrap({
     if (externalRetryId !== undefined) globalThis.clearTimeout(externalRetryId);
     if (activeTimeoutId !== undefined) globalThis.clearTimeout(activeTimeoutId);
     activeController?.abort();
+    boundaryController?.abort();
     unsubscribeRetry();
   };
 }
@@ -246,6 +292,29 @@ export function BootstrapGate({ children }: { children: ReactNode }) {
     return startTelegramPreferenceBootstrap({
       platform,
       onReady: () => setReady(true),
+      onSynchronized: (result, signal) => {
+        if (
+          signal.aborted ||
+          document.visibilityState !== 'visible' ||
+          !shouldSettleAfterTelegramForegroundSync(result)
+        ) return;
+        const fingerprint = platform.getSessionFingerprint?.();
+        void useBankStore.getState().settleNow().then(() => {
+          if (
+            signal.aborted ||
+            document.visibilityState !== 'visible' ||
+            fingerprint !== platform.getSessionFingerprint?.() ||
+            useBankStore.getState().ledgerMode === 'read_only'
+          ) return;
+          // Local rates already implement freshness caching; server mode asks
+          // its authority and never calls the public provider from the client.
+          return useBankStore.getState().refreshRates();
+        }).catch((error: unknown) => {
+          if (signal.aborted) return;
+          const message = error instanceof Error ? error.message : 'unknown settlement error';
+          console.warn(`[telegram] foreground settlement failed: ${message}`);
+        });
+      },
     });
   }, [manualRetry, platform]);
 

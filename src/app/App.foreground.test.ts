@@ -54,6 +54,8 @@ describe('Telegram foreground synchronization ownership', () => {
   const storage = new Map<string, string>();
 
   beforeEach(async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-06T12:00:00Z'));
     storage.clear();
     vi.stubGlobal('localStorage', {
       getItem: (key: string) => storage.get(key) ?? null,
@@ -68,6 +70,10 @@ describe('Telegram foreground synchronization ownership', () => {
     host.telegramId = '42';
     host.load.mockReset().mockResolvedValue(preferences());
     vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    vi.spyOn(document, 'addEventListener');
+    vi.spyOn(document, 'removeEventListener');
+    vi.spyOn(globalThis, 'addEventListener');
+    vi.spyOn(globalThis, 'removeEventListener');
     // Reference rates are unrelated to this lifecycle boundary; no real
     // provider requests are sent while the actual bank store is exercised.
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Offline reference rates'); }));
@@ -75,9 +81,8 @@ describe('Telegram foreground synchronization ownership', () => {
     document.body.append(container);
     root = createRoot(container);
     await act(async () => root?.render(createElement(App)));
-    await act(async () => {
-      await vi.waitFor(() => expect(container.querySelector('main h1')?.textContent).toBe('Cometa'));
-    });
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(container.querySelector('main h1')?.textContent).toBe('Cometa');
     expect(useBankStore.getState().ledgerMode).toBe('local');
     expect(useBankStore.getState().profile.telegramId).toBe('42');
   });
@@ -88,6 +93,7 @@ describe('Telegram foreground synchronization ownership', () => {
     container.remove();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   function pendingBootstrap(): {
@@ -113,9 +119,58 @@ describe('Telegram foreground synchronization ownership', () => {
     };
   }
 
-  async function foreground(): Promise<void> {
+  async function foreground(elapsedMs = 30_000): Promise<void> {
+    // Move the budget clock without also firing unrelated future retry timers.
+    vi.setSystemTime(Date.now() + elapsedMs);
     await act(async () => document.dispatchEvent(new Event('visibilitychange')));
   }
+
+  async function scheduledRetry(): Promise<void> {
+    await act(async () => vi.advanceTimersByTimeAsync(1_000));
+  }
+
+  it('coalesces foreground churn during an unfinished cold bootstrap into one request', async () => {
+    await act(async () => root?.unmount());
+    host.load.mockClear();
+    const pending = pendingBootstrap();
+    root = createRoot(container);
+    await act(async () => root?.render(createElement(App)));
+    expect(host.load).toHaveBeenCalledOnce();
+    for (let edge = 0; edge < 5; edge += 1) await foreground(0);
+    expect(host.load).toHaveBeenCalledOnce();
+    expect(pending.signal().aborted).toBe(false);
+    await act(async () => pending.resolve(preferences()));
+    expect(container.querySelector('main h1')?.textContent).toBe('Cometa');
+  });
+
+  it('retains the server-copy decision and local history through same-session offline foreground', async () => {
+    const persisted = storage.get('cometa.bank.tma.user.42');
+    const local = JSON.parse(persisted ?? '{}').state as ReturnType<typeof buildSeed>;
+    const server: LaunchState = {
+      ...preferences(),
+      bank: {
+        contractVersion: 1, mode: 'server', telegramId: '42',
+        revisionEpoch: 'b'.repeat(32), revision: 1, digest: 'c'.repeat(64),
+        warnings: [], state: { ...local, primaryCurrency: 'USD' },
+      },
+    };
+    host.load.mockResolvedValue(server);
+    await foreground();
+    expect(useBankStore.getState().ledgerSyncError).toBe('server_copy_confirmation_required');
+    expect(container.textContent).toContain('Use server copy');
+    const failed = pendingBootstrap();
+    await scheduledRetry();
+    expect(container.textContent).toContain('Use server copy');
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await act(async () => failed.reject(new TypeError('Offline while choosing a server copy')));
+    expect(container.textContent).toContain('Use server copy');
+    expect(storage.get('cometa.bank.tma.user.42')).toBe(persisted);
+    const button = container.querySelector('button');
+    if (button === null) throw new Error('Server-copy confirmation is missing');
+    await act(async () => button.click());
+    expect(useBankStore.getState().ledgerMode).toBe('server');
+    expect(useBankStore.getState().primaryCurrency).toBe('USD');
+  });
 
   it('preserves an unsent transfer draft through same-identity local foreground success, failure and retry', async () => {
     await act(async () => useUiStore.getState().openSheet({ kind: 'transferOwn' }));
@@ -146,7 +201,7 @@ describe('Telegram foreground synchronization ownership', () => {
     expect(document.querySelector('[role="dialog"]')).toBe(dialog);
     expect(dialog.querySelector('output')?.textContent).toContain('123');
     const retry = pendingBootstrap();
-    await foreground();
+    await scheduledRetry();
     await act(async () => retry.resolve(preferences()));
     expect(document.querySelector('[role="dialog"]')).toBe(dialog);
     expect(dialog.querySelector('output')?.textContent).toContain('123');
@@ -155,6 +210,7 @@ describe('Telegram foreground synchronization ownership', () => {
 
   it('finishes a verified local-mode foreground sync without unmounting the bank shell', async () => {
     const persisted = storage.get('cometa.bank.tma.user.42');
+    const rateRequests = vi.mocked(fetch).mock.calls.length;
     const pending = pendingBootstrap();
     await foreground();
 
@@ -162,11 +218,66 @@ describe('Telegram foreground synchronization ownership', () => {
     expect(container.querySelector('main h1')?.textContent).toBe('Cometa');
     expect(pending.signal().aborted).toBe(false);
     expect(storage.get('cometa.bank.tma.user.42')).toBe(persisted);
+    expect(fetch).toHaveBeenCalledTimes(rateRequests);
 
     await act(async () => pending.resolve(preferences()));
     expect(useBankStore.getState().ledgerMode).toBe('local');
     expect(container.querySelector('main h1')?.textContent).toBe('Cometa');
     expect(storage.get('cometa.bank.tma.user.42')).toBe(persisted);
+    expect(fetch).toHaveBeenCalledTimes(rateRequests + 1);
+  });
+
+  it('coalesces persisted pageshow and visibility refreshes after readiness', async () => {
+    const previousCount = host.load.mock.calls.length;
+    const pending = pendingBootstrap();
+    vi.setSystemTime(Date.now() + 30_000);
+    await act(async () => {
+      globalThis.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+      document.dispatchEvent(new Event('visibilitychange'));
+      globalThis.dispatchEvent(new Event('online'));
+    });
+    expect(host.load).toHaveBeenCalledTimes(previousCount + 1);
+    expect(pending.signal().aborted).toBe(false);
+    await act(async () => pending.resolve(preferences()));
+    expect(container.querySelector('main h1')?.textContent).toBe('Cometa');
+  });
+
+  it('quarantines a changed raw identity immediately while its HTTP retry waits for cooldown', async () => {
+    const previousUser = storage.get('cometa.bank.tma.user.42');
+    const previousCount = host.load.mock.calls.length;
+    const pending = pendingBootstrap();
+    host.fingerprint = 'changed-during-cooldown';
+    await foreground(0);
+    expect(useBankStore.getState().profile.telegramId).toBeUndefined();
+    expect(container.querySelector('main')).toBeNull();
+    expect(host.load).toHaveBeenCalledTimes(previousCount);
+    await act(async () => vi.advanceTimersByTimeAsync(29_999));
+    expect(host.load).toHaveBeenCalledTimes(previousCount);
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(host.load).toHaveBeenCalledTimes(previousCount + 1);
+    expect(pending.signal().aborted).toBe(false);
+    await act(async () => pending.resolve(preferences('43')));
+    expect(container.querySelector('main')?.textContent).toContain('Grace');
+    expect(storage.get('cometa.bank.tma.user.42')).toBe(previousUser);
+  });
+
+  it('aborts an obsolete in-flight identity without starting an unmetered replacement', async () => {
+    const previousUser = storage.get('cometa.bank.tma.user.42');
+    const stale = pendingBootstrap();
+    await foreground();
+    const previousCount = host.load.mock.calls.length;
+    host.fingerprint = 'changed-with-request-in-flight';
+    await foreground(0);
+    expect(stale.signal().aborted).toBe(true);
+    expect(useBankStore.getState().profile.telegramId).toBeUndefined();
+    expect(container.querySelector('main')).toBeNull();
+    expect(host.load).toHaveBeenCalledTimes(previousCount);
+    const current = pendingBootstrap();
+    await act(async () => vi.advanceTimersByTimeAsync(30_000));
+    expect(host.load).toHaveBeenCalledTimes(previousCount + 1);
+    await act(async () => current.resolve(preferences('43')));
+    expect(container.querySelector('main')?.textContent).toContain('Grace');
+    expect(storage.get('cometa.bank.tma.user.42')).toBe(previousUser);
   });
 
   it('retries a failed verified local foreground bootstrap without changing the bank state', async () => {
@@ -176,11 +287,11 @@ describe('Telegram foreground synchronization ownership', () => {
     await foreground();
     await act(async () => failed.reject(new TypeError('Connection interrupted')));
 
-    expect(warnings).toHaveBeenCalledWith('[telegram] foreground bank sync failed: Connection interrupted');
+    expect(warnings).toHaveBeenCalledWith('[telegram] preferences bootstrap failed: Connection interrupted');
     expect(useBankStore.getState().ledgerMode).toBe('local');
     expect(storage.get('cometa.bank.tma.user.42')).toBe(persisted);
     const retry = pendingBootstrap();
-    await foreground();
+    await scheduledRetry();
     expect(retry.signal().aborted).toBe(false);
     await act(async () => retry.resolve(preferences()));
 
@@ -241,7 +352,26 @@ describe('Telegram foreground synchronization ownership', () => {
     root = undefined;
     expect(pending.signal().aborted).toBe(true);
     const countAfterUnmount = host.load.mock.calls.length;
-    document.dispatchEvent(new Event('visibilitychange'));
+    const persisted = storage.get('cometa.bank.tma.user.42');
+    await foreground();
+    await act(async () => {
+      globalThis.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+      globalThis.dispatchEvent(new Event('online'));
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
     expect(host.load).toHaveBeenCalledTimes(countAfterUnmount);
+    expect(storage.get('cometa.bank.tma.user.42')).toBe(persisted);
+    const visibilityListeners = vi.mocked(document.addEventListener).mock.calls
+      .filter(([name]) => name === 'visibilitychange');
+    expect(visibilityListeners).toHaveLength(1);
+    for (const [name, listener] of visibilityListeners) {
+      expect(document.removeEventListener).toHaveBeenCalledWith(name, listener);
+    }
+    const recoveryListeners = vi.mocked(globalThis.addEventListener).mock.calls
+      .filter(([name]) => name === 'pageshow' || name === 'online');
+    expect(recoveryListeners).toHaveLength(2);
+    for (const [name, listener] of recoveryListeners) {
+      expect(globalThis.removeEventListener).toHaveBeenCalledWith(name, listener);
+    }
   });
 });

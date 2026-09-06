@@ -312,6 +312,21 @@ export const useBankStore = create<BankStore>()((set, get) => {
     return persisted.kind === 'ok' ? persisted.state : pickBankState(get());
   };
 
+  /** Recheck authority after waiting for a local mutation's cross-tab lock. */
+  const readLocalMutationBase = (): BankState => {
+    const telegramId = getActiveTelegramPersistenceId();
+    if (isTelegramPersistenceRuntime() && (
+      get().ledgerMode !== 'local' || telegramId === undefined ||
+      hasStickyServerLedgerMode(telegramId)
+    )) {
+      if (get().ledgerMode === 'local') {
+        set({ ledgerMode: 'read_only', ledgerSyncError: 'server_sync_required' });
+      }
+      throw new ServerLedgerReadOnlyError();
+    }
+    return readMutationBase();
+  };
+
   const quarantineChangedTelegramSession = (): void => {
     if (!isTelegramPersistenceRuntime()) return;
     const previousScope = getActivePersistenceScope();
@@ -501,7 +516,7 @@ export const useBankStore = create<BankStore>()((set, get) => {
         }
       }
       return withPersistenceLock(() => {
-        const base = readMutationBase();
+        const base = readLocalMutationBase();
         const outcome = applyBankCommand(
           base,
           { kind: 'transfer', request: input },
@@ -532,7 +547,7 @@ export const useBankStore = create<BankStore>()((set, get) => {
         return;
       }
       await withPersistenceLock(() => {
-        const current = readMutationBase();
+        const current = readLocalMutationBase();
         if (current.primaryCurrency === primaryCurrency) {
           adopt(current);
           return;
@@ -561,7 +576,9 @@ export const useBankStore = create<BankStore>()((set, get) => {
           if (get().ledgerMode !== 'local' || requiresServerSync) {
             set({
               ledgerMode: 'read_only',
-              ledgerSyncError: requiresServerSync ? 'server_sync_required' : null,
+              ledgerSyncError: get().ledgerSyncError === 'server_copy_confirmation_required'
+                ? 'server_copy_confirmation_required'
+                : requiresServerSync ? 'server_sync_required' : null,
             });
           }
         }
@@ -730,13 +747,30 @@ export const useBankStore = create<BankStore>()((set, get) => {
 
       let candidate: ServerBankRevision;
       if (bank.mode === 'import_required') {
-        // This write precedes the network request. A committed import whose
-        // response is lost can never fall back to a client-local ledger.
-        if (!markStickyServerLedgerMode(telegramId)) {
-          set({ ledgerMode: 'read_only', ledgerSyncError: 'receipt_persistence_failed' });
-          return 'retry';
+        // Freeze the local write path before capturing the import. A foreground
+        // bridge may still have mounted drafts when authority first becomes known.
+        serverGateway = null;
+        set({ ledgerMode: 'read_only', ledgerSyncError: 'server_sync_required' });
+        // Serialize the cutover with existing local writers, then capture the
+        // latest durable snapshot even if its storage event has not arrived.
+        const local = await withPersistenceLock(() => {
+          signal.throwIfAborted();
+          if (getActiveTelegramPersistenceId() !== telegramId) {
+            throw abortError('Telegram persistence namespace changed');
+          }
+          if (!markStickyServerLedgerMode(telegramId)) {
+            set({ ledgerMode: 'read_only', ledgerSyncError: 'receipt_persistence_failed' });
+            return null;
+          }
+          const latest = readMutationBase();
+          adopt(latest);
+          return latest;
+        }, signal);
+        signal.throwIfAborted();
+        if (getActiveTelegramPersistenceId() !== telegramId) {
+          throw abortError('Telegram persistence namespace changed');
         }
-        const local = pickBankState(get());
+        if (local === null) return 'retry';
         if (local.profile.telegramId !== telegramId) {
           set({ ledgerMode: 'read_only', ledgerSyncError: 'telegram_session_changed' });
           return 'retry';
@@ -879,7 +913,7 @@ export const useBankStore = create<BankStore>()((set, get) => {
       try {
         const exchangeRates = await request.promise;
         const updated = await withPersistenceLock(() => {
-          const current = readMutationBase();
+          const current = readLocalMutationBase();
           if (isNewerLiveSnapshot(current.exchangeRates, exchangeRates)) {
             adopt(current);
             return false;
@@ -936,7 +970,7 @@ export const useBankStore = create<BankStore>()((set, get) => {
           return;
         }
         await withPersistenceLock(() => {
-          const before = readMutationBase();
+          const before = readLocalMutationBase();
           const settlement = applySettleAllWithinTransactionLimit(
             before,
             new Date().toISOString(),
@@ -964,7 +998,7 @@ export const useBankStore = create<BankStore>()((set, get) => {
         return;
       }
       await withPersistenceLock(() => {
-        const current = readMutationBase();
+        const current = readLocalMutationBase();
         const card = current.cards.find((candidate) => candidate.id === cardId);
         if (card === undefined) {
           adopt(current);
@@ -992,7 +1026,7 @@ export const useBankStore = create<BankStore>()((set, get) => {
         return;
       }
       await withPersistenceLock(() => {
-        const current = readMutationBase();
+        const current = readLocalMutationBase();
         const reset = rebuildDemoBase(
           current,
           current.demoBaseCurrency,

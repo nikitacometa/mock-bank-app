@@ -29,6 +29,39 @@ afterEach(() => {
 });
 
 describe('startTelegramPreferenceBootstrap', () => {
+  it('meters successful foreground refreshes under the same rolling budget as cold bootstrap', async () => {
+    vi.useFakeTimers();
+    const onReady = vi.fn();
+    const onSynchronized = vi.fn();
+    let signal: ((event: 'online' | 'visible') => void) | undefined;
+    const synchronize = vi.fn().mockResolvedValue('current');
+    const cleanup = startTelegramPreferenceBootstrap({
+      platform: telegramPlatform(), onReady, onSynchronized, synchronize,
+      maxAttempts: 3, attemptWindowMs: 100, externalRetryCooldownMs: 10,
+      subscribeRetry: (listener) => { signal = listener; return () => undefined; },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(synchronize).toHaveBeenCalledOnce();
+    expect(onSynchronized).not.toHaveBeenCalled();
+    for (let round = 0; round < 2; round += 1) {
+      for (let edge = 0; edge < 20; edge += 1) signal?.('visible');
+      expect(vi.getTimerCount()).toBe(1);
+      await vi.advanceTimersByTimeAsync(10);
+    }
+    expect(synchronize).toHaveBeenCalledTimes(3);
+    expect(onSynchronized).toHaveBeenCalledTimes(2);
+    for (let edge = 0; edge < 20; edge += 1) signal?.('online');
+    await vi.advanceTimersByTimeAsync(50);
+    expect(synchronize).toHaveBeenCalledTimes(3);
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(31);
+    signal?.('visible');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(synchronize).toHaveBeenCalledTimes(4);
+    expect(onReady).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
   it('recovers HTTP 502 before releasing the splash when the retry fits the deadline', async () => {
     vi.useFakeTimers();
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
