@@ -1,20 +1,31 @@
 # Cometa — resume point and next phase
 
-Date: 2026-09-06. Source `5774b01` is deployed on Irena as current B `20260906T071101Z`, with
-previous A `20260906T071100Z`. Both are authority-capable; Docker/Caddy hardening is complete.
-Persisted ledger mode is still `local`, with zero canonical imports. Candidate `2897de5` retains
+Date: 2026-09-06. Recovery is pending: B `20260906T095602Z` activation failed its health gate and
+automatic rollback to A `20260906T095601Z` also left the bot unhealthy after repeated unchanged
+`setMyName` calls received Telegram `429`. Web remains healthy; Docker/Caddy hardening is installed.
+Ledger mode is `local`, with zero canonical imports. Recovery fixes `8c0b647` (profile read-before-write)
+and `774f0ae` (guarded `prepare --repair-bot`) passed 815 tests; final `pnpm verify` passed again
+at `12:23Z`. At `12:21Z` the combined Opus runner
+exited 1 because the organization disabled Claude Code subscription access. No accepted review
+exists: restore Anthropic access and complete review, or obtain an explicit owner emergency
+review-gate waiver before recovery deploy. This is not a quota retry; do not fallback or repeat.
+Current is `20260906T095601Z`, previous `20260906T071101Z`; web healthy, bot unhealthy. Recovery
+packages `20260906T104101Z`/`20260906T104102Z` from `774f0ae` are locally ready, each with 815 tests
+and matching source/checksums, but not uploaded/prepared/activated. Earlier candidate `2897de5` retains
 the prior lifecycle/import fixes and fixes v19's terminal cold-session guard with a red/green
 compiling mutant. Full `pnpm verify` passed: 799 tests (577 web + 222 bot). Immutable browser
 verification passed 5 scenarios / 19 checks; report: `/private/tmp/cometa-foreground-browser-2897de5-4ZzXID/report.json`.
 V19's continuous-progress visual preference was rejected after unchanged Chrome geometry/focus
-and an explicit CLAUDE invariant. The candidate is not deployed.
+and an explicit CLAUDE invariant. These checks cover the source of the failed release pair.
 Original v20 did not run because of session quota. Exact Opus 5 retry finished at `10:18Z`:
 `clean`, zero findings, resolved source `2897de5`. Evidence is in
 `/private/tmp/claude-paired-review-final-20260906-v20-retry/report.json` and `meta.json`.
 The 9 signed checks passed again at `10:05Z`; live health and LOCAL/zero imports were reconfirmed
 at `10:08Z`. Final packages `20260906T095601Z`/`20260906T095602Z` were uploaded at `10:19Z`;
-local/remote checksums pass and extracted source trees are identical. Strict preflights are running;
-neither release is activated yet.
+local/remote checksums, extracted source parity and strict preflights passed before the failed B
+activation and unhealthy rollback A. Public visuals are in `51a2eb0`; latest Linux CI for `774f0ae`
+passed at `12:16:08Z`, run `34032518573`. At `12:15:14Z`, both 438-row snapshots retained their hashes
+and compiled `071101` marker; authority remained LOCAL with zero imports. None proves bot recovery.
 The milestone is not accepted.
 
 The deployed source passed 763 tests, 10 local web-browser checks, 9 synthetic signed real-backend
@@ -37,22 +48,25 @@ in `docs/handoff.md`; architecture remains canonical in `docs/spec.md`.
   to Cometa.
 - Caddy is the only public listener/TLS owner on Irena. Docker web is loopback-only on `8080/8443`;
   the retained `8443` Nginx TLS hop is temporary bridge compatibility. Legacy Certbot units stay
-  disabled/inactive. Current B and previous A are source-clean; old manually patched C/D releases
+  disabled/inactive. The release pair is source-clean but bot health recovery is pending; old patched C/D releases
   are historical migration evidence, not active rollback slots. The new data-persistence rollback
   rehearsal remains pending.
 - Production uses the exact versioned Docker daemon policy and Caddy's caddy-owned Unix admin
   socket, mode `0200`, with `persist_config off` and `h1/h2`. Trusted inner TLS and real-IP gates,
-  key-only SSH, UFW `22/80/443`, `jq 1.8.1`, stable health and TLS/API smoke passed.
+  key-only SSH, UFW `22/80/443`, `jq 1.8.1` and TLS/API gates were verified. Earlier stable bot health
+  is historical; the latest bot startup/rollback incident is recorded above.
 - Both real Telegram Old profiles, Nikita and MetaFlexer, persisted compiled marker B. Nikita's
   438 existing rows were preserved exactly; MetaFlexer's 437 became 438 only through interest.
   Do not reset these snapshots or identify either profile as John Cometa from a display name.
 - Current native QA limitation: inline coordinate clicks return `-10005` in Telegram Old and the
   separately owner-authorized main Telegram.app. Nikita's Cometa chat opened through Cmd+K/Return,
-  but the English click failed again at `10:07Z`. AX open Mini App works. Both Old profiles retained
-  their exact 438-row snapshot hashes at `10:05Z`. The Browser plugin lists no connected browsers;
+  but the English click failed again at `10:07Z`. At `12:19Z` keyboard chat open worked, while
+  coordinate Open Cometa returned `AXError.notImplemented`; the manual-open request is unanswered.
+  Both Old profiles retained exact 438-row hashes and marker `071101` at `12:15:14Z`.
+  The Browser plugin lists no connected browsers;
   the request to connect one via Settings → Computer use and log in to Web Telegram is unanswered.
   Callback onboarding remains unverified; main Telegram and Web are explicitly authorized.
-- Two local showcase compositions are ready: actual web screenshots and an explicitly illustrative
+- Two showcase compositions are published in `51a2eb0`: actual web screenshots and an explicitly illustrative
   Telegram preview using exact bot-engine copy, not native captures. Their provenance is in
   `docs/assets/showcase/README.md`; neither replaces real-profile acceptance.
 - `nikitacometa/mock-bank-app` is public by owner decision. Exact KZT dates, merchants and amounts
@@ -126,23 +140,30 @@ in `docs/handoff.md`; architecture remains canonical in `docs/spec.md`.
 ## Resume order
 
 1. Read `CLAUDE.md`, `docs/handoff.md`, this file and `deploy/standalone/README.md`.
-2. Inspect `git status` and preserve unrelated changes. The final review for `2897de5` passed at
-   `10:18Z`: exact Opus 5 v20 retry is clean, zero findings. The original quota failure is historical;
-   no further review wait is needed. The full 799-test gate and immutable browser 5-scenario /
-   19-check pass are green. Check package parity and existing audit/secret/diff evidence. The owner
-   asked to finish the overlong task; do not start another improvement or review cycle.
+2. Inspect `git status` and preserve unrelated changes. The immediate blocker is the organization-
+   disabled Claude Code access: combined recovery review exited 1 at `12:21Z`, without an accepted
+   report. Restore access and complete review, or obtain an explicit owner emergency review-gate
+   waiver. Do not switch models or repeat the blocked runner. The clean v20 review and browser passes
+   for `2897de5` remain scoped evidence, not review of the later fixes. The owner asked to finish
+   the overlong task; do not start unrelated improvement or audit cycles.
 3. Recheck Irena, current/previous images, containers/restarts, `ledger_mode=local`, Caddy semantics,
    exact loopback bindings, quiesced renewal units, DNS and TLS/API smoke. The Docker/Caddy bridge
    is already installed; do not rerun its host-wide migration as the next normal release step.
-4. Freeze one final source tree and package it under two NEW immutable release IDs. Compare the
-   extracted source trees, strict-preflight both, prepare both, then activate A and B through the
+4. Only after resolving the review blocker, recover the bot using guarded `prepare --repair-bot`.
+   Keep authority
+   local and preserve the live DB/token; do not repeat unchanged profile writes or the host migration.
+   Recovery `774f0ae` packages `20260906T104101Z`/`20260906T104102Z` are already locally ready, each
+   with 815 tests and identical source/checksums. They are not uploaded/prepared/activated. Evidence:
+   `/private/tmp/cometa-774f0ae-package-proof.GJ1xzO/source-diff.log`. Upload and strict-preflight both,
+   prepare both, then activate A and B through the
    normal hardened lifecycle while ledger mode stays `local`. Both rollback slots must contain the
    final fix before first server activation. Superseded prepared `20260906T075300Z`/`20260906T075301Z`
    from `aab2dc0` must not be used or overwritten. Uploaded `20260906T092401Z`/`20260906T092402Z`
    from `de36540` and local `20260906T094101Z`/`20260906T094102Z` from `5838c51` are also superseded:
    never prepare or activate them. The final `2897de5` pair is `20260906T095601Z`/`20260906T095602Z`;
    both were uploaded at `10:19Z`, local/remote checksums and extracted source parity pass.
-   Strict preflights are running; neither release is activated yet.
+   Strict preflights passed, but B activation and automatic rollback A left the bot unhealthy with
+   repeated unchanged `setMyName 429`. Recovery deployment is not yet complete.
    Each new activation creates its normal root-only
    SQLite backup and passes immutable-image, health and inner/outer TLS/API gates.
 5. Repeat real Telegram Old foreground/reopen, native-control and snapshot-preservation checks in
@@ -150,7 +171,8 @@ in `docs/handoff.md`; architecture remains canonical in `docs/spec.md`.
    438-row snapshots intact except for legitimate time-derived settlement. The owner authorized
    deploy and QA of these own profiles, including mock-bot messages and callbacks; unrelated
    external actions are not covered by that authorization.
-   Coordinate inline clicks fail with `-10005` in Old and main Telegram; AX open works. Await the
+   Coordinate inline clicks fail in Old and main Telegram; latest Open Cometa returned
+   `AXError.notImplemented` at `12:19Z`. Await the
    owner's response to connect a browser through Settings → Computer use / Web Telegram login,
    then finish the real callbacks. Main Telegram and Web are explicitly authorized.
 6. Only after the fix and real-profile retest, apply the one-way server-mode switch and import each

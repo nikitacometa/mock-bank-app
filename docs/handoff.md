@@ -1,16 +1,28 @@
 # Cometa — handoff
 
-Дата среза: 2026-09-06. Source `5774b01` deployed на Irena: current B `20260906T071101Z`,
-previous A `20260906T071100Z`; Docker/Caddy perimeter применён и проверен. Оба release поддерживают
-authority, но `ledger_mode` остаётся `local`: server switch и canonical imports ещё не выполнялись.
+Дата среза: 2026-09-06. Recovery pending: activation B `20260906T095602Z` не прошёл health gate;
+automatic rollback на A `20260906T095601Z` тоже оставил bot unhealthy из-за повторных неизменённых
+`setMyName` calls и Telegram `429`. Web остаётся healthy. Docker/Caddy perimeter установлен;
+`ledger_mode=local`, server switch и canonical imports не выполнялись. Recovery deploy ещё не сделан.
+Fix `8c0b647` добавляет profile read-before-write, `774f0ae` — guarded `prepare --repair-bot`.
+Final `pnpm verify` повторно прошёл 815 tests в `12:23Z`, но recovery review заблокировано:
+в `12:21Z` runner завершился с exit 1,
+Anthropic organization отключила Claude Code subscription access. Это не quota retry и не clean
+review. До recovery deploy нужен восстановленный доступ и accepted review либо явный emergency
+review-gate waiver владельца; не подменять модель и не повторять заблокированный запуск.
+Current — `20260906T095601Z`, previous — `20260906T071101Z`; web healthy, bot unhealthy.
+Recovery packages `20260906T104101Z`/`20260906T104102Z` из `774f0ae` готовы только локально:
+оба прошли 815 tests, source parity и checksums; не uploaded/prepared/activated.
 Candidate `2897de5` сохраняет предыдущие lifecycle/import исправления и закрывает terminal
 cold-session guard из v19 с red/green compiling mutant. Полный `pnpm verify` прошёл: 799 tests,
 577 web + 222 bot. Immutable real-browser pass прошёл 5 scenarios / 19 checks. Visual preference
 v19 о continuous progress отклонён: Chrome подтвердил неизменные geometry/focus, поведение явно
-зафиксировано в CLAUDE invariant. Candidate ещё не deployed.
+зафиксировано в CLAUDE invariant. Это проверенный source pair неудачного deploy, не текущий healthy gate.
 Первоначальный v20 не запустился из-за session quota; exact Opus 5 retry завершён в `10:18Z`:
 verdict `clean`, 0 findings, resolved source `2897de5`.
-В `10:05Z` повторно пройдены 9 signed checks; live health и LOCAL/zero imports подтверждены в `10:08Z`.
+В `10:05Z` повторно пройдены 9 signed checks; healthy checkpoint `10:08Z` предшествует bot incident.
+Visuals опубликованы в `51a2eb0`. Последний Linux CI для `774f0ae` green в `12:16:08Z`,
+run `34032518573`; это не review waiver и не доказательство live recovery.
 CLAUDE invariants ранее записаны в `ae9c65e`.
 Новый milestone
 ещё не принят.
@@ -24,8 +36,10 @@ candidate и повторный native pass после его deploy. Production
 
 ## Текущий результат
 
-На `https://euphoria.bot` работает authority-capable bridge B. Пока `ledger_mode=local`, web и
-Telegram bank state остаются device-local, а bot публикует только non-mutating commands. Existing
+На `https://euphoria.bot` web остаётся healthy после неудачного B activation и unhealthy rollback A.
+Bot recovery pending: его polling/readiness нельзя считать восстановленными. Пока `ledger_mode=local`,
+web и Telegram bank state остаются device-local; разрешённый bot profile содержит только
+non-mutating commands. Existing
 owner snapshots сохранены: Nikita — все 438 rows без изменения; MetaFlexer — 437→438 только за счёт
 interest settlement. Это два проверяемых собственных Telegram Old профиля; их не следует
 отождествлять с John Cometa по одному display name.
@@ -34,8 +48,9 @@ interest settlement. Это два проверяемых собственных
 остаётся: coordinate clicks по inline-кнопкам возвращают `-10005`, AX open Mini App работает.
 Owner отдельно разрешил основной Telegram и Web. В Telegram.app открыт чат Cometa профиля Nikita
 через Cmd+K/Return, но English coordinate click в `10:07Z` также завершился `-10005`.
-Browser plugin вернул пустой список подключённых browsers. Асинхронная просьба подключить browser
-через Settings → Computer use и войти в Web Telegram пока без ответа. Это не завершённый
+В `12:19Z` основной Telegram Cometa chat снова открыт клавиатурой; coordinate Open Cometa теперь
+возвращает `AXError.notImplemented`. Browser plugin не видит connected browsers. Просьбы подключить
+browser/войти в Web Telegram и вручную открыть Open Cometa пока без ответа. Это не завершённый
 callback-onboarding; John Cometa не идентифицирован.
 
 Deployed bridge поднимает persistence до schema 5 и добавляет восемь deterministic fixtures:
@@ -186,8 +201,8 @@ Bot активирован на Irena. По явному решению влад
 `@MyBankApp_Bot`, сохранил token как regular file с owner `10001:10001` и mode `0600`, затем локальный
 clipboard был очищен. Значение не попало в argv, repo, docs, memory или command output. Это осознанный
 security debt: перед любым нетестовым или публичным использованием token всё равно нужно revoke/rotate.
-Startup закончил profile setup и polling: в логах есть `bot_http_listening` и `bot_polling_ready`,
-ошибок setup/polling и container restarts нет.
+Ранний healthy startup закончил profile setup и polling. После deploy `095602` и rollback `095601`
+это исторический checkpoint: повторный `setMyName 429` блокирует readiness, recovery ещё не deployed.
 
 `install-secret.sh` проверяет candidate через `getMe` именно для `@MyBankApp_Bot`, не кладёт token
 в argv/logs и атомарно меняет live file. Standalone activation использует release-labelled images,
@@ -233,7 +248,8 @@ Docker Engine `29.7.2` использует единственный `-H fd://`,
 31-second stable health и inner/outer TLS/API smoke прошли.
 
 Оба source-clean release собраны из `5774b01`: A `20260906T071100Z` activated в `07:22:17Z`,
-B `20260906T071101Z` — в `07:23:53Z`. Сейчас B current, A previous; оба authority-capable.
+B `20260906T071101Z` — в `07:23:53Z`. Это историческая успешная bridge pair, не текущие release IDs:
+позднее B `095602` activation не прошёл gate, automatic rollback A `095601` тоже unhealthy.
 Перед A и B созданы root-only WAL-safe SQLite backups в `07:20:46Z` и `07:22:22Z` соответственно,
 в `/srv/cometa-bank/backups` на том же VPS. Persisted `ledger_mode` остаётся `local`; импортов нет.
 Старые C/D (`20260902T233104Z`/`20260902T233133Z`) и их вручную patched loopback source — только
@@ -273,9 +289,10 @@ units. Installed Caddyfile проверяется семантически то�
 Первый clean bridge завершён. Выполненный порядок: package/extract A/B → из A
 `install-docker-perimeter.sh` dry-run и `--apply` → из A
 `release.sh harden-edge` dry-run и `--apply` → strict preflight A/B → prepare A/B → activate A/B при
-ledger mode `local`. Обе стороны `current`/`previous` теперь source-clean; active lifecycle следует
-запускать через current B, не через исторические C/D scripts. Совместимость двух rollback slots
-проверена release gates; фактический B→A→B с owner ledger changes ещё требует rehearsal.
+ledger mode `local`. Обе стороны стали source-clean. После позднего `setMyName 429` incident
+продолжать нужно по guarded recovery path, а не повторять host-wide migration или activation
+неизменённого bot. Совместимость ранней pair проверена release gates; фактический B→A→B с owner
+ledger changes ещё требует rehearsal.
 
 Deployed code поддерживает двухрелизный authority bridge и one-way
 `release.sh ledger-mode server --apply`. `/app/<release-id>/` служит cache-key alias: любой
@@ -354,17 +371,32 @@ Telegram Android/iOS acceptance.
 - Final pair для `2897de5` собрана и uploaded на Irena в `10:19Z`. A `20260906T095601Z`, package SHA-256
   `d76e6c535e9e77192d66272011473fbcb221ef38ea2d0314847d0b71955dbe93`; B `20260906T095602Z`,
   SHA-256 `547025dc4bcf77a465bacb8a89aaf8b02025fb5e0eff18eaf4d6940c0c488175`.
-  Local и remote checksums PASS, extracted source trees идентичны по `diff -qr`. Strict preflight
-  выполняется; ни один release ещё не activated.
+  Local и remote checksums PASS, extracted source trees идентичны по `diff -qr`; strict preflights
+  прошли. B activation затем не прошёл health gate; automatic rollback A тоже unhealthy из-за
+  repeated unchanged `setMyName 429`. Web healthy, authority LOCAL, imports не выполнялись.
+- Recovery fixes: `8c0b647` — profile read-before-write, `774f0ae` — guarded `prepare --repair-bot`.
+  815 tests green; в `12:21Z` combined Opus runner завершился exit 1: organization disabled Claude
+  Code subscription access. Actual model — `claude-opus-5`, accepted report отсутствует.
+  Evidence: `/private/tmp/claude-paired-review-recovery-20260906/{raw.json,stderr.log}`.
+  Recovery deploy требует восстановления Anthropic access и review либо явного owner emergency
+  waiver. Не считать clean v20 на `2897de5` review этих fixes и не делать fallback/repeat.
+- Recovery pair `20260906T104101Z`/`20260906T104102Z` для `774f0ae` locally ready: каждый package
+  прошёл 815 tests, source identical/checksums PASS; не uploaded/prepared/activated. Evidence:
+  `/private/tmp/cometa-774f0ae-package-proof.GJ1xzO/source-diff.log`. CI `774f0ae` green в `12:16:08Z`,
+  run `34032518573`.
+- В `12:15:14Z` authority LOCAL, imports 0; оба snapshots по 438 rows сохранили hashes и compiled
+  marker `071101`. Current `095601`, previous `071101`, web healthy/bot unhealthy.
 - В `10:05Z` повторены 9 signed checks, PASS, и подтверждены прежние точные hashes двух native
   438-row snapshots. В `10:08Z` live health повторно healthy, authority LOCAL, canonical imports 0.
 - Native inline coordinate clicks в Old и основном Telegram.app блокируются `-10005`; основной
   Cometa chat Nikita открыт через Cmd+K/Return, English click повторил ошибку в `10:07Z`.
   Owner разрешил основной Telegram/Web. Browser plugin видит ноль connected browsers; ответ на
-  просьбу Settings → Computer use / Web Telegram login ещё не получен. AX open Mini App работает.
-- Локально готовы два showcase visuals: реальные web screenshots и явно помеченный illustrative
+  просьбу Settings → Computer use / Web Telegram login ещё не получен. В `12:19Z` keyboard chat open
+  сработал, coordinate Open Cometa вернул `AXError.notImplemented`; просьба manual open без ответа.
+- Два showcase visuals опубликованы в `51a2eb0`: реальные web screenshots и явно помеченный illustrative
   Telegram preview с точным copy реального bot engine. Это не native Telegram capture и не
-  acceptance evidence. Источники: `docs/assets/showcase/README.md`.
+  acceptance evidence. Источники: `docs/assets/showcase/README.md`. Linux CI для `de5395a` green,
+  run `34027603574`; это не доказательство восстановления live bot.
 
 ### Local implementation and review history
 
@@ -584,23 +616,27 @@ Telegram Android/iOS acceptance.
 
 ## Открытые gates
 
-1. Final review gate для `2897de5` закрыт в `10:18Z`: exact Opus 5 v20 retry clean, 0 findings.
-   Первоначальная quota failure — исторический статус; новый review ждать не нужно.
-   Полный 799-test gate и immutable browser 5 scenarios / 19 checks уже зелёные. Зафиксировать
-   final package parity и audit/secret/diff evidence. Владелец попросил закончить затянувшуюся
-   задачу: не открывать новые improvement/audit/review cycles.
-2. Выпустить два новых immutable source-identical releases через текущий hardened lifecycle:
+1. Immediate blocker: Anthropic organization отключила Claude Code access; combined recovery review
+   завершилось exit 1 без accepted report в `12:21Z`. Нужен восстановленный доступ и review либо
+   явный emergency review-gate waiver владельца. Не делать model fallback или повторные запуски.
+   Clean v20 для `2897de5` и его browser checks остаются scoped evidence, не review новых fixes.
+   Владелец попросил закончить затянувшуюся задачу: не открывать дополнительные improvement cycles.
+2. Только после закрытия review blocker восстановить bot через guarded `prepare --repair-bot`,
+   используя locally ready `774f0ae` pair `104101`/`104102` (815 tests каждый, source/checksums PASS).
+   Они ещё не uploaded/prepared/activated. Продолжить hardened lifecycle:
    strict preflight обоих, prepare обоих, activate A затем B при `ledger_mode=local`. Оба rollback
    slots должны содержать final fix; не использовать superseded `075300`/`075301` и загруженные
    `092401`/`092402` и `094101`/`094102`. Final pair `095601`/`095602` для `2897de5` uploaded в `10:19Z`:
-   local/remote checksums и extracted source parity PASS; strict preflight идёт, activation ещё не было.
+   local/remote checksums, source parity и preflights PASS, но B activation и automatic rollback A
+   оставили bot unhealthy с `setMyName 429`. Recovery deploy ещё не выполнен; web healthy и mode LOCAL.
    Docker perimeter
    и Caddy migration уже выполнены; повторный host-wide migration не является следующим шагом.
    Перепроверить health,
    TLS/API, compiled marker нового build, foreground/reopen и сохранность snapshots в Nikita и
    MetaFlexer. Owner явно разрешил deploy и QA этих собственных профилей; не запрашивать blanket
    action-time approval для каждого mock-bot шага. Unrelated external actions этим не разрешены.
-   Native inline clicks в Old и разрешённом основном Telegram блокируются `-10005`; AX open работает.
+   Native inline clicks в Old/основном Telegram блокируются; последний Open Cometa в `12:19Z`
+   вернул `AXError.notImplemented`, manual-open request без ответа.
    Browser plugin пока без connected browser; дождаться ответа на просьбу подключить его через
    Settings → Computer use / войти в Web Telegram и завершить реальные callback flows.
 3. Только после исправления и real-profile retest выполнить one-way `ledger-mode server --apply`,

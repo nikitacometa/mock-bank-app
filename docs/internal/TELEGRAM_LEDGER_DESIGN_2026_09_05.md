@@ -1,9 +1,18 @@
 # Telegram ledger and currency templates — анализ и план
 
-Date: 2026-09-06. Gate 1 approved. Source `5774b01` is live on Irena as current B
-`20260906T071101Z`, with previous A `20260906T071100Z`; both are authority-capable and the
-Docker/Caddy bridge is installed. Persisted `ledger_mode` remains `local`; canonical imports and
-server activation have not run. Real Telegram foreground QA exposed frontend recovery bugs in B.
+Date: 2026-09-06. Gate 1 approved. Recovery pending: B `20260906T095602Z` activation failed its
+health gate; automatic rollback to A `20260906T095601Z` also left the bot unhealthy after repeated
+unchanged `setMyName` calls received Telegram `429`. Web remains healthy and the Docker/Caddy
+bridge is installed. Persisted `ledger_mode=local`; canonical imports and server activation have
+not run. Recovery fixes `8c0b647` (profile read-before-write) and `774f0ae` (guarded
+`prepare --repair-bot`) passed 815 tests; final `pnpm verify` passed again at `12:23Z`.
+At `12:21Z`, the combined review runner exited 1 because
+the organization disabled Claude Code subscription access; there is no accepted report. Recovery
+deploy requires restored Anthropic access and completed review, or an explicit owner emergency
+review-gate waiver. Do not fallback or repeat this blocked runner. Current is `20260906T095601Z`,
+previous `20260906T071101Z`; web healthy/bot unhealthy. Recovery `774f0ae` archives
+`20260906T104101Z`/`20260906T104102Z` are locally ready only, not uploaded/prepared/activated.
+See Revision 33 for this incident; earlier checkpoints remain historical.
 
 Frozen runtime candidate `2897de5` passed `pnpm verify` at `09:55Z`: 799 tests (577 web + 222 bot).
 Opus v19 returned two P3 findings, not clean: the terminal-cold retry defect is fixed and the
@@ -11,12 +20,15 @@ recovery-copy finding is rejected with browser evidence and the intended UX cont
 are adjudicated. The final immutable browser replay passed five scenarios / 19 checks with zero
 runtime errors; nine signed-backend browser checks also passed on `2897de5` at `10:05Z`.
 The exact Opus 5 v20 retry returned clean at `10:18Z` on `2897de5`, with no findings; the original
-v20 stopped before review on a session limit. The review gate is closed. Normal deploy is starting,
-not yet verified complete. New archives `20260906T095601Z` and
+v20 stopped before review on a session limit. That source review gate is closed, not the later
+recovery-fix review. Archives `20260906T095601Z` and
 `20260906T095602Z` are built, with identical extracted source and passing checksums.
 Both were uploaded at `10:19Z`; remote checksums, source parity and strict preflights passed.
-Neither is activated. Both owner snapshots still matched their 438-row parity hashes
-at `10:05Z`; production was healthy and in local mode at `10:08Z`.
+B activation and its automatic rollback A subsequently failed bot health, as recorded above.
+Both owner snapshots still matched their 438-row parity hashes at `10:05Z`; the healthy `10:08Z`
+production checkpoint predates this incident. Both 438-row snapshots still matched their hashes
+and compiled `071101` marker at `12:15:14Z`, LOCAL with zero imports. Visuals are public in `51a2eb0`;
+latest Linux CI for `774f0ae` passed at `12:16:08Z`, run `34032518573`, not a live recovery gate.
 Uploaded `5838c51` archives
 `20260906T094101Z` / `20260906T094102Z` passed source/checksum checks and both preflights but were
 never prepared or activated. They and the earlier `de36540` pair `20260906T092401Z` /
@@ -148,12 +160,13 @@ The approved implementation contract spans the deployed bridge and the unrelease
   drafts; every canonical state adoption reconciles account/card/transfer targets, while a real
   namespace change resets transient UI. The candidate fixes the real-foreground self-abort and
   adds one shared bootstrap/recovery budget, durable copy-decision preservation and locked import
-  cutover, plus late-first-fingerprint and in-flight progress handling; deployed B has not received
-  these fixes yet. Revisions 30–32 distinguish the prior verified snapshots from committed
+  cutover, plus late-first-fingerprint and in-flight progress handling. These frontend fixes entered
+  the `095601`/`095602` pair; bot health subsequently failed. Revisions 30–32 distinguish the prior verified snapshots from committed
   `2897de5`, which also preserves terminal-cold failure after mid-attempt SDK arrival: 799 tests
   pass, final immutable browser checks pass, and all v19 items are adjudicated. The exact-model
   v20 retry returned clean with no findings at `10:18Z`; the original session-limit failure remains
-  historical. The candidate's review gate is closed, not its deploy or native acceptance gates.
+  historical. That source review gate is closed; the later combined recovery review is blocked by
+  organization-disabled Claude access (Revision 33). Native gates remain open.
 - History keeps a reversibly closed account selectable and exposes its localized `закрыт` /
   `closed` status in the account button's accessible name. The visual circle is hidden from the
   accessibility tree, and active-account names remain free of a status suffix.
@@ -165,7 +178,9 @@ The approved implementation contract spans the deployed bridge and the unrelease
 The A/B bridge is deployed, but authority is still disabled. Both own Telegram Old profiles,
 Nikita and MetaFlexer, persisted B's compiled marker; Nikita's 438 rows remained identical and
 MetaFlexer's 437 gained only one interest row. Neither profile was identified as John Cometa.
-Remaining gates are a verified fresh release of the reviewed candidate, real foreground/reopen
+The immediate blocker is the disabled Anthropic access: restore it and complete review or obtain
+an explicit owner emergency review-gate waiver. Then continue guarded bot recovery and a
+verified fresh release, real foreground/reopen
 and snapshot-preservation retests, then the
 one-way server switch and first imports. Mutation
 journeys, rollback persistence and accepted live captures follow. Chromium with synthetic Telegram
@@ -636,11 +651,11 @@ exists.
 | M0 — baseline + design | Time-safe rate fixture, code audit, design and adversarial revision | Full baseline green; revised plan approved | `pnpm verify`, `git diff --check` | Нет | done |
 | M1 — domain v5 + templates | Account/card lifecycle reasons, `demoBaseCurrency`, `fixtureId`, manual/adjustment transitions, safe recurring materializer, v4→v5 migration, eight seeds | KZT 436→437 lifecycle preserved; synthetic fixtures do not encode statement rows; pinned parity holds; savings/date/capacity contracts hold | Domain/persistence tests, named mutants, full verify | None | deployed in A/B; preservation checks passed |
 | M2 — authority core | Shared bot bundle, additive SQLite tables, strict import, hashed idempotency, monotonic epoch/revision, signed bank API | Create-if-absent import preserves v4; atomic per-user commands; retry/collision/limit/restore cases typed; old DB opens | Repository/HTTP tests, migration/fallback harness, Opus money/concurrency review | Images only; service flag local | deployed in A/B; server mode and imports disabled |
-| M3 — TMA sync | Platform command seam, sticky server receipt, ordered canonical adoption, foreground sync, web remains local | No local fallback after authority; stale response rejected; two IDs isolated; conflicting second-device import fails closed | Store/adapter tests, two-context Playwright TMA emulation, mutants | Reviewed frontend release before authority | bridge deployed; 2897de5 has 799 tests, mutant and both final browser suites green; exact v20 clean at 10:18Z; normal deploy starting, authority still local |
+| M3 — TMA sync | Platform command seam, sticky server receipt, ordered canonical adoption, foreground sync, web remains local | No local fallback after authority; stale response rejected; two IDs isolated; conflicting second-device import fails closed | Store/adapter tests, two-context Playwright TMA emulation, mutants | Reviewed frontend release before authority | 2897de5 frontend/browser/v20 gates green; current095601 bot unhealthy; recovery815 tests/CI green but review blocked by disabled Claude access; authority local |
 | M4 — transaction + recurrence bot UX | `/add`, `/recurring`, durable wizard, year/month/day backfill, typed outbox, RU/EN copy | Checking income/expense/date/monthly/backfill/pause/resume/cancel work across restart and retry; expense never overdraws or partially backfills | Bot behavior tests, parser/balance boundaries, stale/foreign callbacks, two-user tests | One-way server switch after M3 retest | deployed but disabled by local mode; live mutation QA pending |
 | M5 — accounts bot UX | `/accounts`, add, adjust, close/restore, client UI reconciliation | Zero-balance close invariant, history retained, manual freeze/pause preserved, savings settles before current adjustment | Domain/bot/UI tests, one-account and closed states, Opus focused review | One-way server switch after M3 retest | deployed but disabled by local mode; live mutation QA pending |
-| M6 — product polish | History effective dates/notes, immutable warning context, backend-only FX, operation-cap recovery and responsive QA | RU/EN readable at 320×568/390×844; no blocked bootstrap/materialization at capacity; full local journeys pass | Playwright, accessibility/overflow, `pnpm verify`, final paired review | Reviewed frontend release before native retest | 799 tests, five-scenario/19-check foreground replay and nine signed browser journeys green; stable geometry/focus proven; exact v20 clean, deploy/native acceptance pending |
-| M7 — bridge release | Prepare two source-identical A/B releases; install the exact Docker daemon perimeter; harden the legacy Caddy/Nginx edge; keep authority local | Docker 28+ uses only systemd `-H fd://` and canonical daemon JSON; Caddy owns public TLS plus a `0200` Unix admin socket with persistence off, verified inner TLS and host-wide `h1/h2`; exact loopback runtime, trusted real IP and quiesced renewal hold; current/previous become source-clean | Installer dry/apply with controlled restart and durable recovery; transactional `harden-edge` dry/apply through current admin endpoint; strict A/B preflight/prepare/activate; inner/outer smoke; pinned A operator on legacy fallback | Owner-authorized deployment; recovery/failure harnesses; two consecutive activations; no ledger import | completed: B `20260906T071101Z` current / A `20260906T071100Z` previous, source 5774b01, ledger local |
+| M6 — product polish | History effective dates/notes, immutable warning context, backend-only FX, operation-cap recovery and responsive QA | RU/EN readable at 320×568/390×844; no blocked bootstrap/materialization at capacity; full local journeys pass | Playwright, accessibility/overflow, `pnpm verify`, final paired review | Reviewed frontend release before native retest | frontend/browser evidence preserved; public visuals51a2eb0, recovery815 tests/Linux CI green; review blocked, bot recovery/native acceptance pending |
+| M7 — bridge release | Prepare two source-identical A/B releases; install the exact Docker daemon perimeter; harden the legacy Caddy/Nginx edge; keep authority local | Docker 28+ uses only systemd `-H fd://` and canonical daemon JSON; Caddy owns public TLS plus a `0200` Unix admin socket with persistence off, verified inner TLS and host-wide `h1/h2`; exact loopback runtime, trusted real IP and quiesced renewal hold; current/previous become source-clean | Installer dry/apply with controlled restart and durable recovery; transactional `harden-edge` dry/apply through current admin endpoint; strict A/B preflight/prepare/activate; inner/outer smoke; pinned A operator on legacy fallback | Owner-authorized deployment; recovery/failure harnesses; two consecutive activations; no ledger import | host bridge completed historically; latest B095602 activation and automatic rollback A095601 bot-unhealthy with setMyName429; guarded recovery pending, web healthy/local |
 | M8 — live acceptance + showcase | Switch service flag, import both preserved owner profiles, current→previous→current mutation probe, RU/EN chat journeys, three real captures | Profiles stay isolated and survive restart/rollback; web demo unaffected; README has exactly three equal sanitized Telegram images in one row | `pnpm verify`, live API/TLS, Telegram Old Computer Use, owner Android/iOS gate, screenshot guard | Reviewed foreground fix and real-profile retest before server switch/import | both B markers and baseline preservation verified; server/native mutation acceptance pending |
 
 Sensitive milestones M1–M5 receive an independent money/concurrency review immediately after focused
@@ -1225,3 +1240,38 @@ Production remains `5774b01`, current B `20260906T071101Z` / previous A `2026090
 starting after the clean review; completion is not yet claimed. Deploy verification,
 real owner-profile preservation/reopen and server activation gates remain open. Server
 mutation, rollback-persistence, native assistive-technology and Android/iOS acceptance are pending.
+
+Revision 33 records the failed release and pending guarded recovery. B `20260906T095602Z`
+activation failed its health gate. Automatic rollback to A `20260906T095601Z` also left the bot
+unhealthy: unchanged profile setup repeatedly called `setMyName` and received Telegram `429`.
+Web remains healthy. Authority is still `local`; no canonical imports occurred. Successful package
+checks, the clean review of `2897de5` and earlier healthy checkpoints do not establish bot readiness
+after this failure.
+
+Recovery fixes are `8c0b647`, which reads the bot profile before deciding whether to write it, and
+`774f0ae`, which adds guarded `prepare --repair-bot`. The 815-test gate passed. At `12:21Z`, the
+combined Opus runner exited 1: the organization disabled Claude Code subscription access. Actual
+model was `claude-opus-5`, but no accepted report was produced. Evidence:
+`/private/tmp/claude-paired-review-recovery-20260906/{raw.json,stderr.log}`. This is neither a clean
+review nor a quota retry. Recovery deploy requires restored Anthropic access and completed review,
+or an explicit owner emergency review-gate waiver. Do not fall back to another model or repeat the
+blocked runner. Recovery deployment has not been performed.
+
+Recovery `774f0ae` packages `20260906T104101Z`/`20260906T104102Z` are locally ready: both passed
+815 tests, have identical extracted source and passing checksums. Evidence:
+`/private/tmp/cometa-774f0ae-package-proof.GJ1xzO/source-diff.log`. Neither is uploaded, prepared or
+activated. Linux CI for `774f0ae` passed at `12:16:08Z`, run `34032518573`.
+
+At `12:15:14Z`, both owner snapshots retained all 438 rows, unchanged parity hashes and compiled
+marker `071101`; authority was LOCAL with zero imports. Current release is `20260906T095601Z`,
+previous `20260906T071101Z`: web healthy, bot unhealthy. No data-reset/import workaround was used.
+
+Showcase visuals are already public in `51a2eb0`: actual web captures and an explicitly illustrative
+Telegram preview, not native acceptance captures. The latest Linux CI is the passing `774f0ae`
+run `34032518573` above; final `pnpm verify` passed 815 tests again at `12:23Z`. These artifacts and
+checks do not waive the review gate or prove live recovery or owner callback flows.
+The main Telegram and web Telegram are owner-authorized. At `12:19Z` keyboard navigation opened
+the Cometa chat, but coordinate Open Cometa returned `AXError.notImplemented`. Browser discovery
+lists no connected browser; connection/login and manual Open Cometa requests are unanswered.
+Native foreground/callback, authority/import, mutation isolation, rollback persistence
+and Android/iOS acceptance remain open.

@@ -74,8 +74,10 @@ pnpm verify
 
 ## Release status
 
-The accepted web and Mini App baseline is live. The expanded Telegram ledger is a release candidate:
-799 automated tests pass, alongside web-browser, signed real-backend, foreground-recovery and
-first-import scenarios. Late Telegram SDK availability also recovers without reloading.
-Production activation and real two-profile Telegram acceptance are still pending. Browser emulation
-does not establish Android or iOS WebView acceptance.
+The web demo is live. Bot recovery is pending after Telegram rate-limited repeated profile setup
+during deployment. The repair passes 815 automated tests and Linux CI; its independent review was
+interrupted by provider access restrictions. Existing demo histories remain intact.
+
+The expanded Telegram ledger remains a release candidate. Signed real-backend, foreground-recovery
+and first-import browser scenarios pass, but server activation and real two-profile Telegram
+acceptance are still pending. Browser emulation does not establish Android or iOS WebView acceptance.

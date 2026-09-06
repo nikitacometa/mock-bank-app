@@ -21,6 +21,36 @@ certificate and renewal.
 
 ## Verified checkpoint — 2026-09-06
 
+**Recovery blocker, checked at 12:21Z:** current is `20260906T095601Z`, previous is
+`20260906T071101Z`. Web is healthy; the bot is unhealthy after B `20260906T095602Z`
+activation and its automatic rollback both hit repeated unchanged `setMyName` writes
+with Telegram `429`. Do not retry those images as a fix. The public web returns 200
+with valid TLS; unauthenticated bootstrap returns 401.
+
+Repair source `774f0ae` includes profile read-before-write (`8c0b647`) and the guarded
+preparation-only flag described below. Both new local packages, `20260906T104101Z`
+and `20260906T104102Z`, pass all 815 tests (577 web + 238 bot), checksum checks and
+extracted source parity. Linux CI passed in run `34032518573` at `12:16:08Z`.
+Neither repair release has been uploaded, prepared or activated.
+
+The independent Opus review exited without an accepted report because Anthropic
+disabled the organization's Claude Code subscription access. Evidence:
+`/private/tmp/claude-paired-review-recovery-20260906/raw.json`. Restore provider access
+or obtain an explicit owner emergency exception to the independent-review gate
+before recovery deployment. Do not substitute a model or describe this as a clean review.
+
+Once that gate is resolved, upload and strict-preflight both new packages, run
+`prepare --repair-bot` on both, then ordinary A/B activation. Keep ledger mode local.
+Read-only parity at `12:15:14Z` confirms both existing profiles retain their exact
+438-row histories and balances, compiled marker `071101`, and zero canonical imports.
+Native acceptance remains open: the main Telegram chat opens by keyboard, but its
+Open Cometa button returned `AXError.notImplemented`. The owner was asked to open it
+manually; the Browser plugin has no connected browser.
+
+The earlier checkpoints below are historical, not current health or release claims.
+
+### Earlier release evidence
+
 Source `5774b01` is deployed as current B `20260906T071101Z`, with previous
 A `20260906T071100Z`. Both releases are authority-capable. The persisted ledger
 mode is still `local`; server activation and canonical imports have not run.
@@ -52,7 +82,7 @@ guard was fixed with a red/green compiling mutant. Its continuous-progress visua
 preference was rejected after unchanged Chrome geometry/focus and an explicit
 CLAUDE invariant. Immutable real-browser verification passed 5 scenarios / 19 checks:
 `/private/tmp/cometa-foreground-browser-2897de5-4ZzXID/report.json`.
-The candidate is not deployed. Original reviewer v20 did not run because of session quota;
+The candidate was later deployed in the failed pair described above. Original reviewer v20 did not run because of session quota;
 `/private/tmp/claude-paired-review-final-20260906-v20/raw.json` reports reset
 `17:10 Asia/Bangkok`. The exact Opus 5 retry finished at `10:18Z`: `clean`, zero
 findings, resolved source `2897de5`. Evidence:
@@ -73,8 +103,9 @@ extracted source trees are identical by `diff -qr`. A package SHA-256:
 `d76e6c535e9e77192d66272011473fbcb221ef38ea2d0314847d0b71955dbe93`.
 B package SHA-256:
 `547025dc4bcf77a465bacb8a89aaf8b02025fb5e0eff18eaf4d6940c0c488175`.
-Strict preflights are running; neither final release is activated yet. Finish the
-normal release cycle without starting a new improvement/review cycle. Keep authority local until both
+Strict preflights passed; A activated, but B activation and automatic rollback A
+left the bot unhealthy. Use the new reviewed recovery source, not another activation
+of this pair. Keep authority local until both
 rollback slots contain the final fix and both native profiles pass new compiled
 markers, foreground/reopen and snapshot preservation.
 The new current→previous→current data-persistence rehearsal and Android/iOS acceptance
