@@ -3,9 +3,10 @@
 Минималистичный mock-необанк уровня «премиальный прод 2026»: fresh fixture начинает с четырёх
 demo-счетов, поддерживает восемь валют, настраиваемую основную валюту, накопительный счёт с
 процентом, live reference rates, историю, мок-карты, переводы, ручные и recurring операции.
-Обычный web хранит mock-ledger локально. Local Telegram candidate реализует server-authoritative
-mock-ledger отдельно для каждого canonical Telegram ID; live release остаётся device-local до
-двухрелизного bridge и explicit one-way switch. Это всё ещё вымышленное демо без реальных денег и
+Обычный web хранит mock-ledger локально. Telegram реализует server-authoritative mock-ledger
+отдельно для каждого canonical Telegram ID. Двухрелизный bridge уже deployed; live mode остаётся
+`local` до проверенного explicit one-way switch (точный runtime status в handoff).
+Это всё ещё вымышленное демо без реальных денег и
 payment rails.
 Полная спека: `docs/spec.md`
 (читать ПЕРВОЙ — там архитектура, отвергнутые подходы с причинами, майлстоуны с AC).
@@ -75,6 +76,9 @@ pnpm test           # vitest
   (`epochDayUTC`), никаких таймеров и «тикающих» display-значений. Persistence не принимает
   `accrualAnchor` раньше UTC-дня создания счёта и preflight'ит реальный settlement на load;
   runtime settlement failure логируется и не превращается в unhandled rejection.
+- **Transaction calendar**: grouping, labels and clocks use UTC, including legacy rows without
+  `effectiveDate`; History labels the timezone explicitly. The accepted KZT fixture retains its
+  original Bangkok-origin instants. Never rewrite fixture timestamps to make UTC look like local time.
 - **Ручные и recurring операции**: income/expense и monthly rules доступны только active checking
   accounts; expense и весь historical backfill не могут увести счёт ниже нуля. Monthly anchor
   выбирается как UTC year/month/day, backfill ограничен 120 строками и применяется атомарно.
@@ -146,6 +150,18 @@ pnpm test           # vitest
   сохранённые config/handlers, а MainButton
   нельзя hide/show на каждом изменении text/disabled. Native control считается доступным только
   после mount + config + handler, иначе остаётся DOM fallback.
+- One persistent `BootstrapGate` coordinator owns cold and foreground Telegram synchronization.
+  Do not add a second foreground bootstrap listener in `Shell` or `App`: it bypasses the shared
+  retry budget and can abort itself when quarantine unmounts the UI. Identity quarantine happens
+  immediately, before the HTTP cooldown; verified visible recovery settles interest and refreshes
+  rates. Same-ID local recovery keeps mounted drafts, and a pending `Use server copy` decision
+  survives foreground/offline retries. First-ever SDK session availability resumes the short cold
+  ladder even without a DOM event; it is not an account switch. Terminal failures stop automatic
+  foreground retries. A healthy first import shows progress without Retry. Once a failure is shown,
+  keep the recovery card mounted during automatic retries and announce truthful RU/EN progress
+  copy. Keep Retry focusable with `aria-disabled` and a click guard while work is pending;
+  do not alternate the card with the splash or show settled-failure copy during import. Settled failures expose
+  recovery, while an explicit server-copy choice remains available.
 - SDK: maintained `@tma.js/sdk-react` 3.0.23 (`@tma.js/sdk` 3.3.0). Legacy
   `@telegram-apps/*` packages запрещено возвращать: они unsupported. Реальный
   BotFather binding готов, signed macOS Telegram WebView pass пройден; полный bot onboarding и
@@ -175,6 +191,10 @@ pnpm test           # vitest
   local-write fallback. Первый импортированный device snapshot становится canonical; отличающаяся
   локальная копия второго device требует явного `Use server copy`. Bootstrap и bot chat reads идут
   через тот же materializer; повтор в один UTC-день не дублирует строки и не повышает revision.
+- Import cutover sets read-only mode before awaiting anything, then takes the persistence lock,
+  writes the sticky marker and captures the latest durable (or unsaved authoritative) local state.
+  Every local mutation rechecks authority inside that same lock, including delayed rates refresh.
+  A writer queued before cutover must never commit a local-only entry after the import snapshot.
 - Bot backend хранит Telegram/private-chat ID, locale, display name, onboarding state, server bank
   snapshot, operation/outbox records и durable conversation draft отдельно для каждого пользователя.
   Следующий wizard session и его `conversation_replies` receipt пишутся одной SQLite transaction;
@@ -191,15 +211,14 @@ pnpm test           # vitest
 ## Deploy / Brand
 
 - Deploy target: dedicated Irena VPS (`ssh irena`) + `euphoria.bot`; runtime root —
-  `/srv/cometa-bank`. Release `20260902T233133Z` active/healthy, identical-source release
-  `20260902T233104Z` is automatic previous; D→C→D rollback rehearsal passed before the host edge
-  changed. Live source copies C/D were later manually patched to loopback ports and therefore are
-  rollback-compatible but not source-clean. Caddy `2.11.4` is now the sole enabled public TLS owner
-  on TCP `80/443`; Docker web binds only `127.0.0.1:8080/8443`, and Caddy temporarily proxies the
-  complete Nginx HTTPS policy on `8443`. Read-only audit found the installed bridge still using a
-  target TLS bypass/default HTTP/3, the legacy TCP Caddy admin endpoint and Nginx without trusted
-  real-IP recovery. Docker still runs without the versioned daemon config. None of the current
-  candidate infrastructure has been applied to production.
+  `/srv/cometa-bank`. Exact current/previous releases and acceptance evidence belong in
+  `docs/handoff.md`; recheck them live before operations. The source-clean bridge and Docker/Caddy
+  perimeter were applied on 2026-09-06. Caddy is the sole enabled public TLS owner on TCP `80/443`;
+  Docker web binds only `127.0.0.1:8080/8443`, and the bot has no host port. Caddy verifies the
+  retained Nginx HTTPS hop on `8443`, uses `h1/h2`, disables persisted autosave and exposes only its
+  caddy-owned Unix admin socket at mode `0200`. The versioned Docker daemon config and trusted
+  Nginx real-IP recovery are installed. Old manually patched September 2 releases are historical
+  migration evidence, not current rollback targets.
   The legacy Certbot timer is disabled/inactive and its service is static/inactive. Do not re-enable
   either unit. Legacy Hostinger remains the TLS-valid external
   rollback origin until Android/iOS acceptance. System, Cloudflare, Google and Quad9 resolvers
@@ -216,14 +235,15 @@ pnpm test           # vitest
   Caddy owns public ACME. Docker Engine 28+ and `jq` are explicit host dependencies. Runtime uses the
   exact `cometa-bank` project, attached primary networks and an allow-listed bridge option set. Bot
   never publishes a host port. Before any release lifecycle action, the one-time
-  `install-docker-perimeter.sh` dry-run/apply must install the exact three-key
+  `install-docker-perimeter.sh` dry-run must remain read-only, including pending journal candidates.
+  Only `--apply` may promote/unlink recovery candidates or install the exact three-key
   `/etc/docker/daemon.json`, keep only systemd socket activation through `-H fd://`, pin the local
   Unix-socket CLI context and complete its controlled Docker restart under a root-only durable
   recovery journal. Exact `.pending.next`/`daemon.json.cometa-bank.next` candidates are recoverable
   only when their owner, mode and shape are unambiguous; any mixed or unknown state fails closed.
   Do not replace `/etc/caddy/Caddyfile` merely for byte parity: validate its scoped `euphoria.bot`
   routes because the host may serve unrelated domains.
-- The first compatible release cycle is controlled: package/prepare two identical-source releases
+- The first compatible release cycle (completed on Irena on 2026-09-06) is controlled: package/prepare two identical-source releases
   A and B; from extracted A run `install-docker-perimeter.sh` dry-run/apply, then target-scoped
   `harden-edge` dry-run/apply, strict-preflight both, prepare both before activating A, then activate
   them consecutively while ledger mode remains `local`. Docker installation requires Engine 28+
@@ -249,7 +269,7 @@ pnpm test           # vitest
   повторяет health gates без ledger mutation. Пока mode `local`, setup и `/help` публикуют только
   `start/settings/help/privacy`. После durable final event operator restart'ит current bot, startup
   публикует server command profiles, затем обязательны 31 секунд stable health и TLS/API smoke;
-  reconciliation повторяет restart и gates. Authority candidate пока не deployed и live DB не
+  reconciliation повторяет restart и gates. Authority-capable code deployed, но live DB пока не
   переключён. Hostinger остаётся только static/TLS fallback и не
   может быть Telegram ledger authority. Encrypted offsite backup/restore drill отложен; локальные
   root-only SQLite backups не являются защитой от потери VPS.
