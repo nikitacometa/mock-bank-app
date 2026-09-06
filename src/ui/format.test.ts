@@ -72,9 +72,11 @@ describe('localized UI formatting', () => {
     const originalTimeZone = environment.TZ;
     try {
       environment.TZ = 'UTC';
+      expect(new Date('2026-09-01T12:34:00.000Z').getHours()).toBe(12);
       expect(fmtTime('2026-09-01T12:34:00.000Z', 'en')).toBe('12:34 PM');
 
       environment.TZ = 'America/New_York';
+      expect(new Date('2026-09-01T12:34:00.000Z').getHours()).toBe(8);
       expect(fmtTime('2026-09-01T12:34:00.000Z', 'en')).toBe('12:34 PM');
     } finally {
       if (originalTimeZone === undefined) delete environment.TZ;
@@ -93,6 +95,7 @@ describe('localized UI formatting', () => {
       const originalTimeZone = environment.TZ;
       environment.TZ = timeZone;
       try {
+        expect(new Date('2026-09-02T22:30:00.000Z').getHours()).not.toBe(22);
         for (const createdAt of ['2026-09-02T22:30:00.000Z', '2026-09-03T00:30:00.000Z']) {
           const transfer: Transaction = {
             id: 'tx_utc_transfer', accountId: 'acc_checking', seq: 1,

@@ -1273,6 +1273,57 @@ bash -c '
   "${docker_socket_listener_flow}" || \
   fail 'pinned local Docker CLI target harness failed'
 
+docker_socket_snapshot_flow="$(sed -n \
+  '/^docker_socket_listener_for_pid() {$/,/^}$/p' "${docker_daemon_perimeter_script}")"
+bash -c '
+  set -Eeuo pipefail
+  eval "$1"
+  harness_root="$(mktemp -d)"
+  trap '\''rm -rf -- "${harness_root}"'\'' EXIT
+  printf "systemd\n" >"${harness_root}/pid-one-comm"
+  snapshot_flow=${2//\/proc\/1\/comm/${harness_root}/pid-one-comm}
+  eval "${snapshot_flow}"
+  fail() { exit 91; }
+  perimeter_systemctl() {
+    case "$*" in
+      "show --property ActiveState --value docker.socket") printf "active\n" ;;
+      "is-enabled docker.socket") printf "enabled\n" ;;
+      "show --property Listen --value docker.socket") printf "/run/docker.sock (Stream)\n" ;;
+      *) exit 92 ;;
+    esac
+  }
+  perimeter_ss() {
+    [[ "$*" == "-H -lxnp" ]] || exit 93
+    printf "%s\n" "${mock_listeners}"
+  }
+  owner_line='\''u_str LISTEN 0      4096 /run/docker.sock 11937 * 0 users:(("dockerd",pid=1009,fd=5),("systemd",pid=1,fd=238))'\''
+  mock_listeners="${owner_line}       "
+  socket_listener_before="$(docker_socket_listener_for_pid 1009)" || exit 1
+  printf -v mock_listeners "%s\t  " "${owner_line}"
+  socket_listener_after="$(docker_socket_listener_for_pid 1009)" || exit 1
+  [[ "${socket_listener_before}" == "${owner_line}" && \
+    "${socket_listener_after}" == "${socket_listener_before}" ]] || exit 1
+
+  mock_listeners=${owner_line/fd=5/fd=6}
+  changed_listener="$(docker_socket_listener_for_pid 1009)" || exit 1
+  [[ "${changed_listener}" == "${mock_listeners}" && \
+    "${changed_listener}" != "${socket_listener_before}" ]] || exit 1
+  mock_listeners=${owner_line/0      4096/0 4096}
+  changed_listener="$(docker_socket_listener_for_pid 1009)" || exit 1
+  [[ "${changed_listener}" == "${mock_listeners}" && \
+    "${changed_listener}" != "${socket_listener_before}" ]] || exit 1
+
+  printf -v duplicate_listeners "%s\n%s" "${owner_line}" "${owner_line}"
+  for mock_listeners in \
+    "${owner_line/pid=1009/pid=2000}" \
+    "${owner_line} users:((\"proxy\",pid=50,fd=4))" \
+    "${owner_line} unexpected" \
+    "${duplicate_listeners}"; do
+    if (docker_socket_listener_for_pid 1009) >/dev/null 2>&1; then exit 1; fi
+  done
+' _ "${docker_socket_listener_flow}" "${docker_socket_snapshot_flow}" || \
+  fail 'Docker socket snapshot padding stability harness failed'
+
 host_daemon_config_path_flow="$(sed -n \
   '/^docker_daemon_config_path_from_args() {$/,/^}$/p' "${docker_daemon_perimeter_script}")"
 host_daemon_process_values_flow="$(sed -n \

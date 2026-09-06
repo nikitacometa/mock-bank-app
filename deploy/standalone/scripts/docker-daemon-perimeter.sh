@@ -113,6 +113,8 @@ docker_socket_listener_for_pid() {
   listener_line="$(awk 'NF { print; exit }' <<<"${matching_listeners}")" || \
     fail 'could not read the Docker socket listener'
   validate_docker_socket_listener "${listener_line}" "${daemon_pid}"
+  listener_line="$(sed 's/[[:blank:]]*$//' <<<"${listener_line}")" || \
+    fail 'could not remove Docker socket listener display padding'
   printf '%s\n' "${listener_line}"
 }
 

@@ -11,7 +11,7 @@ import { STATEMENT_ROWS } from './statementData';
 import { ledgerErrors } from './invariants';
 import { balanceOf } from './ledger';
 
-const NOW = new Date(2026, 8, 1, 23, 59, 59, 999).toISOString();
+const NOW = '2026-09-01T16:59:59.999Z';
 const CHECKING_FLOOR_MINOR = 5_000_000;
 const SAVINGS_OPENING_MINOR = 850_000_000;
 const FIXTURE_COMPANIONS = {
@@ -162,10 +162,7 @@ describe('buildSeed', () => {
         counterparty: 'ChatGPT',
       }),
     ]);
-    const pendingDate = new Date(pendingRows[0].createdAt);
-    expect([pendingDate.getFullYear(), pendingDate.getMonth() + 1, pendingDate.getDate()]).toEqual([
-      2026, 6, 19,
-    ]);
+    expect(pendingRows[0].createdAt.slice(0, 10)).toBe('2026-06-19');
   });
 
   it('continues the real merchant pattern after the statement and allocates the portfolio', () => {
@@ -239,7 +236,11 @@ describe('buildSeed', () => {
     }
   });
 
-  it('stores merchant purchases at the local wall-clock hours rendered by the UI', () => {
+  it('preserves merchant opening hours in the accepted fixture origin timezone', () => {
+    // These immutable instants originate in Bangkok; the UI deliberately displays UTC.
+    const fixtureHour = new Intl.DateTimeFormat('en', {
+      timeZone: 'Asia/Bangkok', hour: 'numeric', hourCycle: 'h23',
+    });
     const merchantPurchases = buildSeed(NOW).transactions.filter(
       (transaction) =>
         transaction.kind === 'purchase' &&
@@ -249,9 +250,9 @@ describe('buildSeed', () => {
 
     expect(merchantPurchases.length).toBeGreaterThan(100);
     for (const transaction of merchantPurchases) {
-      const displayedHour = new Date(transaction.createdAt).getHours();
-      expect(displayedHour).toBeGreaterThanOrEqual(8);
-      expect(displayedHour).toBeLessThan(23);
+      const originalHour = Number(fixtureHour.format(new Date(transaction.createdAt)));
+      expect(originalHour).toBeGreaterThanOrEqual(8);
+      expect(originalHour).toBeLessThan(23);
     }
   });
 
