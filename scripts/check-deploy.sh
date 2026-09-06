@@ -4811,7 +4811,7 @@ bash -c '
       [[ "${missing_bot:-false}" != true ]]
       return
     fi
-    [[ "${pending_retry:-false}" != true || "${runtime_repaired:-false}" == true ]]
+    [[ "${pending_retry:-false}" != true || -f "${case_root}/runtime-repaired" ]]
   }
   assert_running_compose_service_bindings() {
     local -r service_name=$1
@@ -4892,7 +4892,7 @@ bash -c '
   }
   restart_current_web() {
     maybe_fail_once restart-web || return 1
-    runtime_repaired=true
+    : >"${case_root}/runtime-repaired"
   }
   inner_upstream_https_smoke() {
     maybe_fail_once inner || return 1
@@ -4937,7 +4937,6 @@ bash -c '
   done
 
   pending_retry=true
-  runtime_repaired=false
   failure_step=none
   case_root="${harness_root}/pending-retry"
   mkdir -p "${case_root}" "${edge_recovery_root}" "${scratch_directory}"
@@ -4947,13 +4946,12 @@ bash -c '
   printf "original-nginx\n" >"${live_config}"
   : >"${edge_recovery_marker}"
   harden_edge >/dev/null
-  [[ "${runtime_repaired}" == true ]]
+  [[ -f "${case_root}/runtime-repaired" ]] || exit 1
   [[ "$(<"${installed_caddy_config}")" == hardened-caddy ]]
   [[ "$(<"${live_config}")" == hardened-nginx ]]
   [[ ! -e "${edge_recovery_marker}" ]]
 
   missing_bot=true
-  runtime_repaired=false
   failure_step=none
   case_root="${harness_root}/pending-missing-bot"
   mkdir -p "${case_root}" "${edge_recovery_root}" "${scratch_directory}"
