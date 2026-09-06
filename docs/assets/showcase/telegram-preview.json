@@ -1,0 +1,217 @@
+{
+  "provenance": {
+    "label": "Sanitized product preview rendered from real engine responses",
+    "runtime": "Production OnboardingEngine and BankFlowEngine with BankAuthorityService, bankDomainAdapter and isolated file-backed SQLite",
+    "syntheticIdentity": "Alex Morgan",
+    "currency": "KZT",
+    "externalTelegramRequests": 0,
+    "productionWrites": 0,
+    "note": "These are not Telegram screenshots or evidence of production acceptance. Message HTML and keyboard labels are captured verbatim. Callback payloads and internal identifiers are omitted. The existing demo fixture is retained."
+  },
+  "frames": [
+    {
+      "title": "Choose your starting point",
+      "messages": [
+        {
+          "role": "bot",
+          "textHtml": "<b>Primary currency</b>\nCometa will use it for the total value of all accounts. Each account keeps its own currency.",
+          "parseMode": "HTML",
+          "keyboard": [
+            [
+              {
+                "text": "KZT · ₸",
+                "kind": "callback"
+              },
+              {
+                "text": "THB · ฿",
+                "kind": "callback"
+              }
+            ],
+            [
+              {
+                "text": "VND · ₫",
+                "kind": "callback"
+              },
+              {
+                "text": "RUB · ₽",
+                "kind": "callback"
+              }
+            ],
+            [
+              {
+                "text": "USD · $",
+                "kind": "callback"
+              },
+              {
+                "text": "EUR · €",
+                "kind": "callback"
+              }
+            ],
+            [
+              {
+                "text": "IDR · Rp",
+                "kind": "callback"
+              },
+              {
+                "text": "GEL · ₾",
+                "kind": "callback"
+              }
+            ]
+          ]
+        },
+        {
+          "role": "user",
+          "text": "Alex Morgan"
+        },
+        {
+          "role": "bot",
+          "textHtml": "<b>Cometa is ready</b>\nName: <b>Alex Morgan</b>\nPrimary currency: <b>KZT · ₸</b>\n\nThis is a demo bank. It does not use real money or payments.",
+          "parseMode": "HTML",
+          "keyboard": [
+            [
+              {
+                "text": "Open Cometa",
+                "kind": "web_app",
+                "url": "https://euphoria.bot/"
+              }
+            ],
+            [
+              {
+                "text": "Change name",
+                "kind": "callback"
+              },
+              {
+                "text": "Telegram name",
+                "kind": "callback"
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Make subscriptions feel real",
+      "messages": [
+        {
+          "role": "bot",
+          "textHtml": "<b>New transaction</b>\nWhat are you recording?",
+          "parseMode": "HTML",
+          "keyboard": [
+            [
+              {
+                "text": "Expense",
+                "kind": "callback"
+              },
+              {
+                "text": "Income",
+                "kind": "callback"
+              }
+            ],
+            [
+              {
+                "text": "Cancel",
+                "kind": "callback"
+              }
+            ]
+          ]
+        },
+        {
+          "role": "bot",
+          "textHtml": "<b>Review expense</b>\nAccount: <b>KZT · Current</b>\nAmount: <b>₸3,210.00</b>\nTo / from: <b>Spotify</b>\nNote: Premium\nMonthly from 2026-07, day 16 · UTC\nBackfill through Sep 6, 2026: <b>2</b> entries · ₸6,420.00\nBalance after: <b>₸609,539.57</b>\n\nThis only records a fictional demo entry. No money moves.",
+          "parseMode": "HTML",
+          "keyboard": [
+            [
+              {
+                "text": "Record expense",
+                "kind": "callback"
+              }
+            ],
+            [
+              {
+                "text": "Cancel",
+                "kind": "callback"
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Keep every account in reach",
+      "messages": [
+        {
+          "role": "user",
+          "text": "/accounts"
+        },
+        {
+          "role": "bot",
+          "textHtml": "<b>Accounts</b>\n4 active · 0 closed\n\nClosing is reversible and keeps the full history.",
+          "parseMode": "HTML",
+          "keyboard": [
+            [
+              {
+                "text": "KZT · Current · ₸609,539.57",
+                "kind": "callback"
+              }
+            ],
+            [
+              {
+                "text": "KZT · Savings · ₸9,922,805.42",
+                "kind": "callback"
+              }
+            ],
+            [
+              {
+                "text": "USD · US dollar account · $800.00",
+                "kind": "callback"
+              }
+            ],
+            [
+              {
+                "text": "EUR · Euro account · €400.00",
+                "kind": "callback"
+              }
+            ],
+            [
+              {
+                "text": "Add account",
+                "kind": "callback"
+              }
+            ],
+            [
+              {
+                "text": "Back",
+                "kind": "callback"
+              }
+            ]
+          ]
+        },
+        {
+          "role": "bot",
+          "textHtml": "<b>Current · KZT</b>\nActive\nBalance: <b>₸609,539.57</b>\nType: checking\n\nHistory remains available after closing.",
+          "parseMode": "HTML",
+          "keyboard": [
+            [
+              {
+                "text": "Adjust balance",
+                "kind": "callback"
+              }
+            ],
+            [
+              {
+                "text": "Close account",
+                "kind": "callback"
+              }
+            ],
+            [
+              {
+                "text": "Back",
+                "kind": "callback"
+              }
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}

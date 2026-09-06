@@ -1,29 +1,55 @@
 # Cometa — handoff
 
-Дата среза: 2026-09-06. Multi-user Telegram ledger и новый Docker/Caddy perimeter реализованы в
-локальном candidate, но ещё не deployed, не включены в live SQLite и не приняты в реальном bot
-flow. Старый web/TMA baseline на Irena остаётся production. Последний полный integrated gate
-предшествует финальным perimeter-изменениям; текущий snapshot ещё требует verify и immutable
-repeat. Перед продолжением читать `CLAUDE.md`, затем этот файл; архитектурный канон остаётся в
+Дата среза: 2026-09-06. Source `5774b01` deployed на Irena: current B `20260906T071101Z`,
+previous A `20260906T071100Z`; Docker/Caddy perimeter применён и проверен. Оба release поддерживают
+authority, но `ledger_mode` остаётся `local`: server switch и canonical imports ещё не выполнялись.
+Candidate `2897de5` сохраняет предыдущие lifecycle/import исправления и закрывает terminal
+cold-session guard из v19 с red/green compiling mutant. Полный `pnpm verify` прошёл: 799 tests,
+577 web + 222 bot. Immutable real-browser pass прошёл 5 scenarios / 19 checks. Visual preference
+v19 о continuous progress отклонён: Chrome подтвердил неизменные geometry/focus, поведение явно
+зафиксировано в CLAUDE invariant. Candidate ещё не deployed.
+Первоначальный v20 не запустился из-за session quota; exact Opus 5 retry завершён в `10:18Z`:
+verdict `clean`, 0 findings, resolved source `2897de5`.
+В `10:05Z` повторно пройдены 9 signed checks; live health и LOCAL/zero imports подтверждены в `10:08Z`.
+CLAUDE invariants ранее записаны в `ae9c65e`.
+Новый milestone
+ещё не принят.
+
+Исторический gate deployed `5774b01`: 541 web + 222 bot tests, 10 local web-browser checks,
+9 synthetic signed real-backend checks и clean narrow Opus v13. Эти results не заменяют review
+candidate и повторный native pass после его deploy. Production isolated-browser pass также прошёл
+10 checks. Перед продолжением читать `CLAUDE.md`,
+затем этот файл; архитектурный канон остаётся в
 `docs/spec.md`, порядок выпуска — в `docs/next-phase.md`.
 
 ## Текущий результат
 
-Текущий live release остаётся polished mock-neobank на `https://euphoria.bot`: четыре demo-счёта
-(KZT current, KZT savings, USD, EUR), device-local bank state и server bootstrap только для
-Telegram preferences. Этот уже принятый baseline не изменён текущей работой.
+На `https://euphoria.bot` работает authority-capable bridge B. Пока `ledger_mode=local`, web и
+Telegram bank state остаются device-local, а bot публикует только non-mutating commands. Existing
+owner snapshots сохранены: Nikita — все 438 rows без изменения; MetaFlexer — 437→438 только за счёт
+interest settlement. Это два проверяемых собственных Telegram Old профиля; их не следует
+отождествлять с John Cometa по одному display name.
 
-Локальный candidate поднимает persistence до schema 5 и добавляет восемь deterministic fixtures:
+В `10:05Z` оба Telegram Old snapshots по 438 rows сохранили точные hashes. Native QA blocker
+остаётся: coordinate clicks по inline-кнопкам возвращают `-10005`, AX open Mini App работает.
+Owner отдельно разрешил основной Telegram и Web. В Telegram.app открыт чат Cometa профиля Nikita
+через Cmd+K/Return, но English coordinate click в `10:07Z` также завершился `-10005`.
+Browser plugin вернул пустой список подключённых browsers. Асинхронная просьба подключить browser
+через Settings → Computer use и войти в Web Telegram пока без ответа. Это не завершённый
+callback-onboarding; John Cometa не идентифицирован.
+
+Deployed bridge поднимает persistence до schema 5 и добавляет восемь deterministic fixtures:
 `KZT`, `THB`, `VND`, `RUB`, `USD`, `EUR`, `IDR`, `GEL`. Fresh fixture всегда начинает с четырёх
 role-accounts; KZT сохраняет owner history, остальные семь используют отдельные synthetic
 country-specific ledgers с тем же pinned USD economics. Onboarding currency выбирает fixture один
 раз; последующая primary currency меняет только reporting, а reset пересоздаёт тот же fixture.
-Checking accounts можно добавлять и reversible close/restore. Home по-прежнему показывает
+Server-mode flows предусматривают add и reversible close/restore checking accounts; пока mode
+local, эти bot-действия выключены. Home по-прежнему показывает
 USD-equivalent активного не-USD счёта; RU/EN покрывают весь interface и formatting.
 
 Ledger-derived balance, integer minor units, frozen FX snapshots, UTC-day interest, Web Lock
-rebase, idempotent transfers и platform seam сохранены. Local candidate имеет explicit v4→v5
-migration; production всё ещё исполняет старый schema-4 build.
+rebase, idempotent transfers и platform seam сохранены. Explicit v4→v5 migration работает в
+deployed build; она не означает переход device-local данных под server authority.
 
 ## Owner statement demo
 
@@ -151,8 +177,9 @@ recovery path; обычные команды, которые всё ещё пр�
 Пока ledger mode остаётся `local`, startup command profiles и `/help` показывают только
 `/start`, `/settings`, `/help`, `/privacy`; mutation UX не рекламируется до authority switch.
 
-Все перечисленные authority/wizard изменения пока только локальны. Live bot на Irena всё ещё
-исполняет старый device-local bank contract; ни server ledger, ни новые chat flows там не включены.
+Authority/wizard implementation теперь deployed в A/B, но пока выключен persisted `local` mode.
+Ни server ledger, ни mutating chat flows ещё не включены; local-mode bridge не должен рекламировать
+`/add`, `/recurring` и `/accounts` как доступные действия.
 
 Bot активирован на Irena. По явному решению владельца ранее опубликованный в chat token временно
 установлен только для тестового запуска: hidden-TTY installer подтвердил через `getMe` точный
@@ -168,7 +195,14 @@ immutable image-ID manifest, serialized deploy `flock`, 31-секундное st
 проверенный rollback. Старый Hostinger activator оставлен только как legacy path; его readiness budget
 синхронизирован с 150-секундным setup deadline, первым 25-секундным long poll и 65-секундным запасом.
 
-BotFather Main Mini App и Menu Button enabled для `https://euphoria.bot/`; bot photo,
+Отдельный deferred portability debt: `deploy/bot/install-secret.sh:146`, ветка `restorePrevious`,
+вызывает `install -o 10001 -g 10001`. На Irena uutils `0.8.0` отвергает эти owner/group arguments,
+поскольку NSS entries для `10001` отсутствуют. Нормальный installer path не затронут; текущий
+token при bridge rollout не менялся. До следующей rotation исправить restore через root-owned
+install + numeric `chown` и проверить восстановление на scratch-файле, не на live credential.
+
+Historical baseline acceptance (2026-09-02…04): BotFather Main Mini App и Menu Button enabled для
+`https://euphoria.bot/`; bot photo,
 description/About и default Web App menu проверены. Бот также синхронизирует локализованный menu
 button для пользователя после `/start`. Реальный Telegram Old на macOS открыл Main App в двух
 профилях, передал два разных подписанных Telegram identity и отрисовал соответствующие имена без
@@ -180,37 +214,33 @@ acceptance gate.
 ## Deploy
 
 Production migration target — выделенный VPS Irena (`ssh irena`, `187.53.132.226`), runtime root
-`/srv/cometa-bank`. Hostname, key-only SSH, non-root `metaflexer` с passwordless sudo, Docker Engine +
+`/srv/cometa-bank`. Hostname, key-only SSH, non-root `irena` с passwordless sudo (live source:
+`ssh -G irena`), Docker Engine +
 Compose, UFW `22/80/443` и unattended upgrades настроены. Login user намеренно не включён в
 root-equivalent группу `docker`.
 
-Read-only preflight 2026-09-06 зафиксировал фактическую топологию после reboot. Caddy `2.11.4`
-enabled/active и единолично держит public TCP `80/443`. Web container публикует только
-`127.0.0.1:8080→8080` и `127.0.0.1:8443→8443`; bot host ports не имеет. Caddy сохраняет исходный
-Host и проксирует apex/`www` в полный Nginx HTTPS policy на loopback `8443` с соответствующим SNI.
-Это временный compatibility hop: публичный certificate и ACME lifecycle принадлежат Caddy, а
-внутренний Nginx certificate больше не является внешней trust boundary. Последний read-only audit
-показал три ещё не применённых live gap: оба Cometa route используют `tls_insecure_skip_verify`,
-Caddy слушает закрытый UFW порт `443/udp` из-за default HTTP/3, а legacy Nginx не восстанавливает
-client IP до rate limit. Они закрыты в local candidate, но остаются live до подтверждённого
-`harden-edge --apply`. Legacy
-`cometa-bank-cert-renew.timer` disabled/inactive, service static/inactive. HSTS отсутствует.
+Verified rollout 2026-09-06 применил Docker perimeter в `07:15:41Z` и Caddy edge hardening в
+`07:17:30Z`. Caddy `2.11.4` enabled/active и единолично держит public TCP `80/443`; protocols —
+только `h1/h2`. Web публикует `127.0.0.1:8080→8080` и `127.0.0.1:8443→8443`, bot host ports
+не имеет. Caddy сохраняет Host, проверяет certificate/SNI внутреннего `8443` hop, а Nginx
+восстанавливает trusted client IP до rate limit. Admin API переехал с TCP `2019` на caddy-owned
+Unix socket mode `0200`; `persist_config off` включён. Legacy
+`cometa-bank-cert-renew.timer` disabled/inactive, service static/inactive; HSTS отсутствует.
 
-Тот же read-only preflight подтвердил Docker Engine `29.7.2`, enabled/active
-`docker.socket` на `/run/docker.sock`, daemon с единственным `-H fd://`, socket
-`root:docker:0660` без non-root members и отсутствие `/etc/docker/daemon.json`. Это текущий
-legacy-default runtime, а не новый verified contract: versioned daemon config и его recovery
-installer на Irena ещё не запускались. Caddy admin пока остаётся на legacy
-`127.0.0.1:2019`; permissioned Unix socket также ещё не применён.
+Docker Engine `29.7.2` использует единственный `-H fd://`, systemd socket activation и локальный
+`/run/docker.sock`; exact versioned `/etc/docker/daemon.json` установлен. Key-only SSH, UFW
+`22/80/443`, loopback/runtime bindings и `jq 1.8.1` проверены. Controlled restart, strict perimeter,
+31-second stable health и inner/outer TLS/API smoke прошли.
 
-Release `20260902T233133Z` (D) активен, `20260902T233104Z` (C) — automatic previous; web/bot healthy,
-restart count `0`. Оба live `compose.yaml` были вручную изменены 2026-09-05 на loopback bindings:
-они runtime-compatible с Caddy, но их release trees больше не immutable/source-clean. Старый
-D→C→D rehearsal остаётся историческим evidence, а не доказательством нового source contract.
-Live bot SQLite проходит `quick_check`, имеет `user_version=2`, не содержит bank authority tables,
-operations или `ledger_mode`; production по-прежнему device-local.
+Оба source-clean release собраны из `5774b01`: A `20260906T071100Z` activated в `07:22:17Z`,
+B `20260906T071101Z` — в `07:23:53Z`. Сейчас B current, A previous; оба authority-capable.
+Перед A и B созданы root-only WAL-safe SQLite backups в `07:20:46Z` и `07:22:22Z` соответственно,
+в `/srv/cometa-bank/backups` на том же VPS. Persisted `ledger_mode` остаётся `local`; импортов нет.
+Старые C/D (`20260902T233104Z`/`20260902T233133Z`) и их вручную patched loopback source — только
+исторический migration evidence, не текущие rollback slots. Новый B→A→B persistence rehearsal
+ещё не принят и остаётся частью live authority QA.
 
-Local deploy candidate устраняет drift в source: Compose фиксирует exact loopback `8080/8443`,
+Deployed release contract устраняет прежний drift: Compose фиксирует exact loopback `8080/8443`,
 tracked Caddy contract описывает оба scoped host route без HSTS и trust bypass, а host preflight
 требует `jq`, enabled/active Caddy, TCP-only `h1/h2`, закрытый UDP `443`, exact running Docker
 bindings, trusted real-IP block и quiesced legacy renewal units. Перед ним отдельный
@@ -240,15 +270,14 @@ smokes, причём inner certificate проходит normal chain/hostname ve
 Они не вызывают certificate issuance, не устанавливают legacy renewal bundle и не включают Certbot
 units. Installed Caddyfile проверяется семантически только для `euphoria.bot`, а не byte-for-byte.
 
-Первый clean bridge требует два заранее упакованных и prepared identical-source release A/B.
-Точный порядок: package/extract A/B → из A `install-docker-perimeter.sh` dry-run и `--apply` → из A
+Первый clean bridge завершён. Выполненный порядок: package/extract A/B → из A
+`install-docker-perimeter.sh` dry-run и `--apply` → из A
 `release.sh harden-edge` dry-run и `--apply` → strict preflight A/B → prepare A/B → activate A/B при
-ledger mode `local`. Пока A current, legacy D остаётся previous; если automatic recovery вернул D,
-единственный canonical operator — immutable script A по
-`/srv/cometa-bank/releases/<A>/.../release.sh`, а legacy D/C lifecycle запускать нельзя. После
-успешного B обе стороны `current`/`previous` source-clean и обычный B→A→B rollback снова безопасен.
+ledger mode `local`. Обе стороны `current`/`previous` теперь source-clean; active lifecycle следует
+запускать через current B, не через исторические C/D scripts. Совместимость двух rollback slots
+проверена release gates; фактический B→A→B с owner ledger changes ещё требует rehearsal.
 
-Local deploy candidate добавляет двухрелизный authority bridge и one-way
+Deployed code поддерживает двухрелизный authority bridge и one-way
 `release.sh ledger-mode server --apply`. `/app/<release-id>/` служит cache-key alias: любой
 well-formed старый release path безопасно отдаёт current image при rollback, а точный запущенный
 build доказывает compiled client-contract marker, не URL string. Если DB уже переключена в
@@ -264,7 +293,7 @@ monitoring и epoch-rotating restore drill явно отложены владе�
 
 Authoritative DNS для apex и `www` переключён на Irena `187.53.132.226`, AAAA отсутствуют. Caddy
 отдаёт публичный Let's Encrypt certificate до 2026-12-04; retained inner Nginx certificate действует
-до 2026-12-01, но проверка его chain/expiry на loopback hop намеренно отключена. Повторная проверка
+до 2026-12-01; после hardening normal chain/hostname verification и expiry gate включены. Проверка
 authoritative/public DNS подтверждает Irena для обоих имён; старый Hostinger vhost всё ещё
 остаётся TLS-valid external rollback origin до real-device acceptance. Hostinger live static release —
 `20260902T113558Z`, rollback release — `20260902T110137Z`; старый vhost остаётся noindex и без HSTS.
@@ -275,9 +304,101 @@ Telegram Android/iOS acceptance.
 
 ## Verification evidence
 
-### Local authority candidate
+### Live bridge checkpoint (2026-09-06)
 
-- Latest focused runs during implementation covered fixture/future-bound validation, deep
+- Source `5774b01` прошёл consecutive A→B activation, strict Docker/Caddy perimeter,
+  stable health и public/inner TLS/API smoke. Root-only WAL-safe backups созданы перед каждой
+  activation; это same-host recovery, не offsite backup.
+- Production isolated-browser suite прошёл 10 checks. Это дополнительный pass на live origin,
+  отдельно от 10 local web и 9 synthetic signed real-backend checks ниже.
+- Реальные Telegram Old profiles Nikita и MetaFlexer сохранили compiled marker B
+  `20260906T071101Z`. Nikita сохранил все 438 существующих ledger rows без изменений; MetaFlexer
+  получил ровно одну interest row поверх 437. John Cometa в этот pass не использовался;
+  display names сами по себе не доказывают совпадения identities.
+- MetaFlexer foreground/resume выявил lifecycle self-abort, оставляющий Mini App в `read_only`.
+  Это историческая находка deployed source; исправления уже входят в candidate `2897de5`.
+  Их локальные regression/mutant/full gates пройдены; v18 fixes сохранены, terminal finding v19
+  исправлен, visual preference отклонён с browser evidence. После первоначальной quota failure
+  exact Opus 5 v20 retry завершился в `10:18Z`: clean, 0 findings на `2897de5`.
+  Нужны два
+  новых source-identical releases и повтор foreground/reopen в обоих реальных профилях с проверкой
+  сохранности данных. Clean review v13 не покрывает candidate.
+- `ledger_mode=local`; server activation, canonical imports, live mutation journeys и новый
+  B→A→B data-persistence rehearsal не выполнялись. Milestone и Android/iOS acceptance не закрыты.
+
+### Local candidate checkpoint (2026-09-06, `2897de5`)
+
+- Candidate `2897de5`: полный `pnpm verify` прошёл, 577 web + 222 bot = 799 tests, включая lint,
+  CSS/deploy/bundle guards, typecheck и production builds. Immutable real-browser pass: 5 scenarios,
+  19 checks, PASS; evidence — `/private/tmp/cometa-foreground-browser-2897de5-4ZzXID/report.json`.
+  Terminal cold-session guard из v19 исправлен с red/green compiling mutant. Visual preference
+  v19 о continuous-progress display отклонён: фактические Chrome geometry и focus неизменны,
+  same-card поведение закреплено явным CLAUDE invariant.
+- Все три confirmed findings завершённого v18 исправлены: та же карточка показывает truthful RU/EN
+  pending copy во время progress/import; `aria-disabled` и click guard сохраняют focus и доступное
+  announcement; SDK, впервые появившийся на 15-й секунде после исчерпанной ladder, обнаруживается
+  на 16-й. Stale timers очищаются, request budget и cooldown для known identity сохраняются.
+  CLAUDE invariants записаны отдельным commit `ae9c65e`.
+- Первоначальный reviewer v20 не выполнялся: `/private/tmp/claude-paired-review-final-20260906-v20/raw.json`
+  сообщает session quota с reset в `17:10 Asia/Bangkok`. Exact Opus 5 retry прошёл `10:10Z`–`10:18Z`:
+  `/private/tmp/claude-paired-review-final-20260906-v20-retry/report.json` и `meta.json` фиксируют
+  verdict `clean`, 0 findings, resolved `2897de5`, actual model `claude-opus-5`, session
+  `b073946a-ed7c-4ee2-8ba9-fa2b4953db59`. Requested effort xhigh; verified effort не наблюдаем
+  (`null`). Final review gate закрыт; новый improvement/review cycle не нужен.
+- Prepared `20260906T075300Z`/`20260906T075301Z` из `aab2dc0` superseded: не активировать и не
+  перезаписывать их. После final review нужны два новых clean source-identical packages через
+  обычный lifecycle. Docker/Caddy migration уже выполнена; оба rollback slots должны получить
+  финальный fix до первого server activation.
+- Загруженные `20260906T092401Z`/`20260906T092402Z` из `de36540` и локальные
+  `20260906T094101Z`/`20260906T094102Z` из `5838c51` superseded и unused: не запускать prepare/activate.
+- Final pair для `2897de5` собрана и uploaded на Irena в `10:19Z`. A `20260906T095601Z`, package SHA-256
+  `d76e6c535e9e77192d66272011473fbcb221ef38ea2d0314847d0b71955dbe93`; B `20260906T095602Z`,
+  SHA-256 `547025dc4bcf77a465bacb8a89aaf8b02025fb5e0eff18eaf4d6940c0c488175`.
+  Local и remote checksums PASS, extracted source trees идентичны по `diff -qr`. Strict preflight
+  выполняется; ни один release ещё не activated.
+- В `10:05Z` повторены 9 signed checks, PASS, и подтверждены прежние точные hashes двух native
+  438-row snapshots. В `10:08Z` live health повторно healthy, authority LOCAL, canonical imports 0.
+- Native inline coordinate clicks в Old и основном Telegram.app блокируются `-10005`; основной
+  Cometa chat Nikita открыт через Cmd+K/Return, English click повторил ошибку в `10:07Z`.
+  Owner разрешил основной Telegram/Web. Browser plugin видит ноль connected browsers; ответ на
+  просьбу Settings → Computer use / Web Telegram login ещё не получен. AX open Mini App работает.
+- Локально готовы два showcase visuals: реальные web screenshots и явно помеченный illustrative
+  Telegram preview с точным copy реального bot engine. Это не native Telegram capture и не
+  acceptance evidence. Источники: `docs/assets/showcase/README.md`.
+
+### Local implementation and review history
+
+Текущие results и открытые deploy/native acceptance gates указаны выше. Более ранние pending/review статусы
+ниже сохранены как хронология; они не отменяют completed A/B bridge и не являются текущим task list.
+
+- Historical candidate `de36540` прошёл 794 tests (572 web + 222 bot) в `09:21Z`. Последующий v18
+  подтвердил три UX/lifecycle findings; они исправлены в `5838c51`. Этот checkpoint superseded
+  последующими gates и не является final review verdict.
+- Historical candidate `5838c51` прошёл 798 tests (576 web + 222 bot) в `09:39Z`/`09:40Z`, последний
+  pass включал final copy. V19 затем нашёл terminal cold-session guard, исправленный в `2897de5`;
+  его continuous-progress visual preference отклонён после immutable browser probe.
+- Historical deployed-source checkpoint, 2026-09-06 (`5774b01`): `pnpm verify` passes 541 web + 222 bot tests, typecheck, lint,
+  CSS/deploy/bundle guards and both production builds. `pnpm audit --prod --audit-level high`
+  reports no known vulnerabilities. Full web suite also passes under UTC and America/New_York;
+  the 49 fixture/format/History tests additionally pass under Pacific/Kiritimati.
+- Browser checks: 10 isolated real-Chrome web journeys cover two-tab writes, reload, overdraft,
+  search, RU/EN and 320/390/1440 widths. Nine synthetic signed Mini App journeys use the real HTTP
+  server, HMAC validation, SQLite and production domain: per-user import/isolation, server writes,
+  native MainButton bridge, offline quarantine, recovery and shared-storage profile switching.
+  These are not real Telegram profile or phone acceptance.
+- Added three cross-layer bot E2E tests with durable SQLite and the actual onboarding engine;
+  duplicate confirmations, restart, canonical import, account lifecycle, recurrence backfill and
+  rejected overdrafts preserve data. Named mutation checks proved the new assertions fail on a
+  broken implementation.
+- Independent Opus v10 found mixed local/UTC history and a mutating deployment dry-run; both are
+  fixed. Live `ss` trailing padding exposed a strict-parser false negative, also fixed. Opus v11
+  identified padding-sensitive snapshot comparison and timezone-dependent tests; the follow-up
+  fixes are committed in `a0ef799`. Its proposed fixture timestamp shift was rejected because the
+  owner requires UTC display and preservation of the accepted fixture. v12 found interior column
+  padding and an undeclared `sed` dependency; `5774b01` uses already-required `awk` after strict
+  validation, normalizing presentation only. Both removed-normalization mutants fail; v13 is clean
+  (actual model `claude-opus-5`, requested xhigh, actual effort unobservable).
+- Earlier focused runs during implementation covered fixture/future-bound validation, deep
   projection, persisted-only replay exemption, wizard reply crash order, raw-session identity
   epochs, UI reconciliation and standalone ledger-mode recovery. An independent frontend preflight
   then closed the remaining P2 mechanisms: leaving History for Home, Cards or global transfer now
@@ -289,7 +410,7 @@ Telegram Android/iOS acceptance.
   tests and 215 bot tests, plus lint, CSS guards, TypeScript, deploy/bundle guards and production
   builds. Its `pnpm audit --prod`, token-shaped secret scan and full-tree `git diff --check` were
   also green. These numbers are historical evidence, not a final claim for the current snapshot;
-  the current harness, full verify, audit/secret/diff scans and immutable repeat are pending.
+  later gates supersede this checkpoint; the current candidate review status is recorded above.
 - Fresh-eyes deploy audit found four concrete staged-edge gaps after the first green guard: active
   commands did not inspect runtime Docker bindings, legacy activation recovery omitted the pinned
   operator warning, Caddy matching allowed extra routes/upstreams, and `status` skipped immutable
@@ -463,37 +584,38 @@ Telegram Android/iOS acceptance.
 
 ## Открытые gates
 
-1. Синхронизировать final deploy harness с Docker installer/Caddy admin contract, затем выполнить
-   `pnpm verify`, production audit, secret/diff scans, named perimeter mutant и final immutable
-   paired-review repeat. Product/browser snapshot раньше прошёл fresh local Playwright, но это не
-   заменяет новый integrated gate. Последний independent edge series закрыл retry deadlock,
-   cross-release markers, directory durability, Compose project
-   identity, unsafe network modes/options, partial producer output, Docker < 28 localhost semantics,
-   exposed bot ports, missing-bot recovery и unchecked rollback/operator slots. Dynamic failure
-   harnesses и named removed-fsync mutant подтверждают guards; нужен immutable verdict по итоговому
-   snapshot.
-2. После отдельного deploy confirmation установить отсутствующий на Irena `jq`, загрузить оба
-   source-clean bridge archive, из A прогнать `install-docker-perimeter.sh` dry-run и `--apply`.
-   Applying form делает controlled restart `docker.service`, проверяет exact pre-existing app
-   identities и либо завершает canonical fd-only local-socket config, либо durable rollback.
-   Затем из A прогнать `harden-edge` dry-run и `--apply`, strict Caddy/loopback/renewal preflight и
-   `prepare` A/B. Hardening меняет только два target route плюс global `h1/h2`, сохраняет unrelated
-   Caddy route blocks, добавляет real-IP block в shared legacy Nginx и переводит Caddy admin на
-   permissioned Unix socket mode `0200` с `persist_config off`. Reload использует текущий endpoint.
-   Controlled Docker restart и host-wide Caddy protocol/admin changes явно входят в maintenance scope.
-   После этого активировать A/B подряд при `ledgerMode=local`. Если A вернул legacy D, продолжать
-   только pinned script A. После B подтвердить source-clean `current`/`previous`, открыть оба owner
-   profiles через release cache-key URL и проверить markers.
-3. Выполнить one-way `ledger-mode server --apply`, импортировать по одному canonical snapshot на
-   профиль и пройти две изолированные RU/KZT и EN/GEL journeys: manual income/expense, recurrence
-   с backfill/no-overdraft, add/adjust/close/restore и B→A→B continuity. Telegram сообщения и
-   callbacks требуют отдельного action-time подтверждения владельца.
+1. Final review gate для `2897de5` закрыт в `10:18Z`: exact Opus 5 v20 retry clean, 0 findings.
+   Первоначальная quota failure — исторический статус; новый review ждать не нужно.
+   Полный 799-test gate и immutable browser 5 scenarios / 19 checks уже зелёные. Зафиксировать
+   final package parity и audit/secret/diff evidence. Владелец попросил закончить затянувшуюся
+   задачу: не открывать новые improvement/audit/review cycles.
+2. Выпустить два новых immutable source-identical releases через текущий hardened lifecycle:
+   strict preflight обоих, prepare обоих, activate A затем B при `ledger_mode=local`. Оба rollback
+   slots должны содержать final fix; не использовать superseded `075300`/`075301` и загруженные
+   `092401`/`092402` и `094101`/`094102`. Final pair `095601`/`095602` для `2897de5` uploaded в `10:19Z`:
+   local/remote checksums и extracted source parity PASS; strict preflight идёт, activation ещё не было.
+   Docker perimeter
+   и Caddy migration уже выполнены; повторный host-wide migration не является следующим шагом.
+   Перепроверить health,
+   TLS/API, compiled marker нового build, foreground/reopen и сохранность snapshots в Nikita и
+   MetaFlexer. Owner явно разрешил deploy и QA этих собственных профилей; не запрашивать blanket
+   action-time approval для каждого mock-bot шага. Unrelated external actions этим не разрешены.
+   Native inline clicks в Old и разрешённом основном Telegram блокируются `-10005`; AX open работает.
+   Browser plugin пока без connected browser; дождаться ответа на просьбу подключить его через
+   Settings → Computer use / войти в Web Telegram и завершить реальные callback flows.
+3. Только после исправления и real-profile retest выполнить one-way `ledger-mode server --apply`,
+   импортировать по одному canonical snapshot на профиль и пройти изолированные RU/EN journeys:
+   manual income/expense, recurrence с backfill/no-overdraft, add/adjust/close/restore и
+   current→previous→current continuity. Не reseed existing snapshots ради валюты сценария и не
+   подменять один из двух профилей John Cometa по имени.
 4. Только после live journeys снять три sanitized Telegram captures в одну строку README и повторить
-   public TLS/API/Playwright plus full verification.
+   public TLS/API/Playwright plus full verification. Текущие два visuals уже имеют provenance:
+   actual web screens и explicit illustrative Telegram engine preview, не native screenshots.
 5. Пройти Android/iOS Telegram WebView acceptance; desktop/browser emulation его не заменяет. Только
    после этого можно выводить Hostinger origin из эксплуатации и обсуждать HSTS.
 6. До любого нетестового/публичного использования revoke/rotate установленный exposed test token и
-   поставить замену через hidden-TTY `release.sh install-token`.
+   поставить замену через hidden-TTY `release.sh install-token`. До rotation закрыть deferred
+   uutils/NSS restorePrevious mismatch в `deploy/bot/install-secret.sh`; текущий token не менялся.
 7. После двух clean bridge releases отдельной задачей перевести Caddy на loopback HTTP, удалить
    redundant inner TLS/Certbot volume и legacy renewal code. До этого Caddy→Nginx `8443` остаётся
    осознанным compatibility hop; legacy renewal units должны оставаться quiesced.
@@ -506,11 +628,28 @@ Telegram Android/iOS acceptance.
 ## Pause checkpoint
 
 Intentional owner KZT fixture из четырёх счетов и 437 операций сохраняется без замены; ещё семь
-synthetic fixtures добавлены рядом, а не поверх него. Новый candidate не принят и не deployed.
-Первый шаг при возвращении — проверить worktree/review status, закончить final local gate, затем
-переснять Irena/DNS/TLS/ledger-mode health; точная очередность записана в `docs/next-phase.md`.
+synthetic fixtures добавлены рядом, а не поверх него. Existing owner rows не сбрасывались;
+оба current 438-row snapshots сохраняются отдельно от frozen fixture. Source `5774b01` deployed как B
+`20260906T071101Z` с previous A `20260906T071100Z`, но новый milestone не принят и authority
+остаётся local. Candidate `2897de5` прошёл 799 tests и immutable browser 5 scenarios / 19 checks;
+terminal finding v19 исправлен, visual preference отклонён с browser/CLAUDE evidence. После
+исторической quota failure exact Opus 5 v20 retry завершён в `10:18Z`: clean, 0 findings на `2897de5`.
+Final pair `095601`/`095602` uploaded в `10:19Z`, local/remote checksums/source parity PASS;
+strict preflight выполняется, activation ещё не было.
+`092401`/`092402` и `094101`/`094102` superseded и не должны проходить prepare/activate. Завершить
+существующий gate без нового improvement cycle, затем продолжить
+normal lifecycle и переснять Irena/DNS/TLS/ledger-mode health. До первого server activation
+нужны final compiled markers и foreground/snapshot preservation в обоих native profiles.
+В `10:05Z` повторены 9 signed checks и точные hashes двух 438-row snapshots; live LOCAL/zero imports
+и health подтверждены в `10:08Z`. Coordinate inline clicks возвращают `-10005` также в разрешённом
+основном Telegram.app (`10:07Z`); Browser plugin не видит connected browser. Ответ на просьбу
+Settings → Computer use / Web Telegram login не получен; John Cometa не идентифицирован.
+Точная очередность записана в `docs/next-phase.md`.
 
 Старый source milestone, English product README, showcase и CI опубликованы в public GitHub repo
 `nikitacometa/mock-bank-app`; локальный `main` отслеживает `origin/main`. Owner явно выбрал public
 visibility при сохранении fingerprintable KZT fixture. Новые три Telegram screenshots пока не
-сняты: их нельзя подменять emulator/fake chrome до M8 acceptance.
+сняты с accepted live mutation journeys. Два локально обновлённых showcase visuals используют
+actual web screenshots и явно обозначенный illustrative Telegram preview с точным engine copy;
+provenance сохранён в `docs/assets/showcase/README.md`. Они не являются evidence live server-mode
+Telegram acceptance.

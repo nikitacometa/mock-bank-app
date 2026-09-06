@@ -1,9 +1,26 @@
 # Cometa — resume point and next phase
 
-Date: 2026-09-06. The multi-user Telegram ledger is an implemented local candidate. It has not been
-deployed, activated or accepted in the live bot. The final Docker/Caddy perimeter changes also remain
-local and still need the integrated gate plus immutable repeat. Current production evidence and exact
-release IDs belong in `docs/handoff.md`; architecture remains canonical in `docs/spec.md`.
+Date: 2026-09-06. Source `5774b01` is deployed on Irena as current B `20260906T071101Z`, with
+previous A `20260906T071100Z`. Both are authority-capable; Docker/Caddy hardening is complete.
+Persisted ledger mode is still `local`, with zero canonical imports. Candidate `2897de5` retains
+the prior lifecycle/import fixes and fixes v19's terminal cold-session guard with a red/green
+compiling mutant. Full `pnpm verify` passed: 799 tests (577 web + 222 bot). Immutable browser
+verification passed 5 scenarios / 19 checks; report: `/private/tmp/cometa-foreground-browser-2897de5-4ZzXID/report.json`.
+V19's continuous-progress visual preference was rejected after unchanged Chrome geometry/focus
+and an explicit CLAUDE invariant. The candidate is not deployed.
+Original v20 did not run because of session quota. Exact Opus 5 retry finished at `10:18Z`:
+`clean`, zero findings, resolved source `2897de5`. Evidence is in
+`/private/tmp/claude-paired-review-final-20260906-v20-retry/report.json` and `meta.json`.
+The 9 signed checks passed again at `10:05Z`; live health and LOCAL/zero imports were reconfirmed
+at `10:08Z`. Final packages `20260906T095601Z`/`20260906T095602Z` were uploaded at `10:19Z`;
+local/remote checksums pass and extracted source trees are identical. Strict preflights are running;
+neither release is activated yet.
+The milestone is not accepted.
+
+The deployed source passed 763 tests, 10 local web-browser checks, 9 synthetic signed real-backend
+checks and clean narrow Opus v13. A separate production browser pass covered 10 checks. These
+results are historical evidence, not the final candidate review or Android/iOS acceptance. Exact evidence belongs
+in `docs/handoff.md`; architecture remains canonical in `docs/spec.md`.
 
 ## Preserved baseline
 
@@ -20,14 +37,28 @@ release IDs belong in `docs/handoff.md`; architecture remains canonical in `docs
   to Cometa.
 - Caddy is the only public listener/TLS owner on Irena. Docker web is loopback-only on `8080/8443`;
   the retained `8443` Nginx TLS hop is temporary bridge compatibility. Legacy Certbot units stay
-  disabled/inactive. Current C/D release trees were manually port-patched and must be replaced by
-  two source-clean releases before ordinary rollback is trusted again.
-- Production still uses the legacy Caddy TCP admin endpoint and has no versioned Docker daemon
-  config. The candidate permissioned Caddy Unix socket and Docker perimeter installer have not run.
+  disabled/inactive. Current B and previous A are source-clean; old manually patched C/D releases
+  are historical migration evidence, not active rollback slots. The new data-persistence rollback
+  rehearsal remains pending.
+- Production uses the exact versioned Docker daemon policy and Caddy's caddy-owned Unix admin
+  socket, mode `0200`, with `persist_config off` and `h1/h2`. Trusted inner TLS and real-IP gates,
+  key-only SSH, UFW `22/80/443`, `jq 1.8.1`, stable health and TLS/API smoke passed.
+- Both real Telegram Old profiles, Nikita and MetaFlexer, persisted compiled marker B. Nikita's
+  438 existing rows were preserved exactly; MetaFlexer's 437 became 438 only through interest.
+  Do not reset these snapshots or identify either profile as John Cometa from a display name.
+- Current native QA limitation: inline coordinate clicks return `-10005` in Telegram Old and the
+  separately owner-authorized main Telegram.app. Nikita's Cometa chat opened through Cmd+K/Return,
+  but the English click failed again at `10:07Z`. AX open Mini App works. Both Old profiles retained
+  their exact 438-row snapshot hashes at `10:05Z`. The Browser plugin lists no connected browsers;
+  the request to connect one via Settings → Computer use and log in to Web Telegram is unanswered.
+  Callback onboarding remains unverified; main Telegram and Web are explicitly authorized.
+- Two local showcase compositions are ready: actual web screenshots and an explicitly illustrative
+  Telegram preview using exact bot-engine copy, not native captures. Their provenance is in
+  `docs/assets/showcase/README.md`; neither replaces real-profile acceptance.
 - `nikitacometa/mock-bank-app` is public by owner decision. Exact KZT dates, merchants and amounts
   remain fingerprintable despite the removal of direct PII.
 
-## Local candidate contract
+## Authority contract (deployed, server mode disabled)
 
 - Eight deterministic fixtures: `KZT`, `THB`, `VND`, `RUB`, `USD`, `EUR`, `IDR`, `GEL`.
 - First valid device import is create-if-absent and canonical. A different second-device snapshot
@@ -82,8 +113,8 @@ release IDs belong in `docs/handoff.md`; architecture remains canonical in `docs
   `server --apply` writes its durable final event, restarts the current bot so startup republishes
   mutation commands, then enforces the 31-second health/TLS gate. Reconciliation retries restart and
   verify again without reversing authority.
-- Before `harden-edge`, immutable release A must run `install-docker-perimeter.sh` dry-run and
-  `--apply`. It requires Docker 28+, installs the exact three-key daemon JSON, binds the daemon only
+- The completed one-time bridge ran `install-docker-perimeter.sh` dry-run and `--apply` before
+  `harden-edge`. It requires Docker 28+, installs the exact three-key daemon JSON, binds the daemon only
   through systemd `-H fd://` and the pinned local Unix socket, and performs one controlled Docker
   restart under a root-only durable install/rollback journal. Exact `.pending.next` and
   `daemon.json.cometa-bank.next` states are recoverable only when ownership, mode and content are
@@ -95,46 +126,39 @@ release IDs belong in `docs/handoff.md`; architecture remains canonical in `docs
 ## Resume order
 
 1. Read `CLAUDE.md`, `docs/handoff.md`, this file and `deploy/standalone/README.md`.
-2. Inspect `git status` and preserve unrelated changes. The last integrated snapshot before the
-   final Docker/Caddy perimeter additions was green at 536 web / 215 bot tests; its production audit
-   and secret/diff scans were also green. Re-run all of them for the current source. The prior
-   full local Playwright pass plus a final-code 390×844/320×568 History→Home/History→Cards
-   re-smoke are green. Browser QA is not Telegram/TMA live acceptance.
-3. Run the final immutable post-fix paired-review repeat. The first two final passes found four
-   concrete boundaries; the follow-up wizard review found stale callbacks/drift/replay; the closing
-   pass found one redundant server settlement on boot, the next pass found impossible exact-capacity
-   retries, residual triage found one unprocessed orphan reply, and the release-core pass found seven
-   crash/perimeter gaps. Follow-up host-perimeter passes also closed Compose identity, Docker 28,
-   exact runtime options/ports, checked producer status, pending-bot and rollback-operator boundaries.
-   Due-state settlement,
-   per-user single-flight, exact-capacity suppression, local foreground rollover and the orphan drain
-   are covered by named mutants, but the latest behavior still needs a clean immutable verdict.
-4. Recheck Irena, containers/restarts, ledger mode, Caddy semantics/listeners, exact loopback Docker
-   bindings, quiesced legacy renewal units, DNS, served TLS and public smoke. Treat old memory and
-   release IDs as stale until verified. After the final local review, package two credential-free,
-   source-identical A/B archives locally and compare their extracted source before requesting deploy
-   confirmation; this does not mutate Irena.
-5. Only after explicit deploy confirmation, install missing `jq`, upload and extract both bridge A
-   and B on Irena. From A, run `install-docker-perimeter.sh` dry-run and then `--apply`; disclose its controlled
-   `docker.service` restart and require its root-only recovery journal to retire cleanly. Next run
-   `harden-edge` dry-run and then `harden-edge --apply`: it removes only the two
-   Cometa trust bypasses, keeps unrelated Caddy route blocks byte-preserved, applies host-wide
-   `h1/h2` to close the unexposed HTTP/3 listener, restores client IP before legacy rate limiting,
-   and migrates Caddy admin to the permissioned non-persistent Unix endpoint through the currently
-   live endpoint.
-   Then run strict preflight, prepare both releases,
-   and activate A and B consecutively with ledger mode still local. During the A→B window, a
-   legacy-D fallback must be managed only through A's pinned immutable script; never run the legacy
-   current script. The edge marker is operator/current/hash-bound and blocks every other lifecycle
-   action; activation/rollback retries accept zero safe containers before repair and require exact
-   bridge topology plus strict cardinality after it. Pending edge hardening may repair a missing web,
-   but requires the release-pinned bot to remain singular and healthy before mutating host config.
-   Durable edge snapshots and activation/rollback intents must be absent after each
-   successful lifecycle command. After B, prove both rollback slots source-clean and verify both
-   compiled markers.
-6. Apply the one-way server-mode switch, then prove one-off, recurrence/backfill, overdraft rejection,
-   add/adjust/close/restore, restart/rollback survival and cross-profile isolation.
+2. Inspect `git status` and preserve unrelated changes. The final review for `2897de5` passed at
+   `10:18Z`: exact Opus 5 v20 retry is clean, zero findings. The original quota failure is historical;
+   no further review wait is needed. The full 799-test gate and immutable browser 5-scenario /
+   19-check pass are green. Check package parity and existing audit/secret/diff evidence. The owner
+   asked to finish the overlong task; do not start another improvement or review cycle.
+3. Recheck Irena, current/previous images, containers/restarts, `ledger_mode=local`, Caddy semantics,
+   exact loopback bindings, quiesced renewal units, DNS and TLS/API smoke. The Docker/Caddy bridge
+   is already installed; do not rerun its host-wide migration as the next normal release step.
+4. Freeze one final source tree and package it under two NEW immutable release IDs. Compare the
+   extracted source trees, strict-preflight both, prepare both, then activate A and B through the
+   normal hardened lifecycle while ledger mode stays `local`. Both rollback slots must contain the
+   final fix before first server activation. Superseded prepared `20260906T075300Z`/`20260906T075301Z`
+   from `aab2dc0` must not be used or overwritten. Uploaded `20260906T092401Z`/`20260906T092402Z`
+   from `de36540` and local `20260906T094101Z`/`20260906T094102Z` from `5838c51` are also superseded:
+   never prepare or activate them. The final `2897de5` pair is `20260906T095601Z`/`20260906T095602Z`;
+   both were uploaded at `10:19Z`, local/remote checksums and extracted source parity pass.
+   Strict preflights are running; neither release is activated yet.
+   Each new activation creates its normal root-only
+   SQLite backup and passes immutable-image, health and inner/outer TLS/API gates.
+5. Repeat real Telegram Old foreground/reopen, native-control and snapshot-preservation checks in
+   Nikita and MetaFlexer. Verify the new compiled marker in both profiles and keep the existing
+   438-row snapshots intact except for legitimate time-derived settlement. The owner authorized
+   deploy and QA of these own profiles, including mock-bot messages and callbacks; unrelated
+   external actions are not covered by that authorization.
+   Coordinate inline clicks fail with `-10005` in Old and main Telegram; AX open works. Await the
+   owner's response to connect a browser through Settings → Computer use / Web Telegram login,
+   then finish the real callbacks. Main Telegram and Web are explicitly authorized.
+6. Only after the fix and real-profile retest, apply the one-way server-mode switch and import each
+   preserved device snapshot once. Prove one-off, recurrence/backfill, overdraft rejection,
+   add/adjust/close/restore, current→previous→current survival and cross-profile isolation. Use RU/EN
+   journeys without reseeding existing accounts to manufacture a different base currency.
 7. Capture three sanitized real Telegram screens in one README row only after the live journeys pass.
+   Until then retain the two honest showcase visuals and their explicit Telegram-preview label.
    Browser emulation does not replace current Android/iOS Telegram acceptance.
 8. Before non-test use, rotate the exposed test bot token through the hidden-TTY installer. Then
    decide Hostinger retirement and HSTS. Remove inner TLS/Certbot only in the separate post-bridge
@@ -143,6 +167,10 @@ release IDs belong in `docs/handoff.md`; architecture remains canonical in `docs
 ## Deferred work
 
 - Encrypted offsite SQLite backup, retention monitoring and an epoch-rotating restore drill.
+- Before the next token rotation, fix the dormant `deploy/bot/install-secret.sh:146`
+  `restorePrevious` path: uutils `0.8.0` rejects `install -o 10001 -g 10001` without NSS entries.
+  Use root-owned install followed by numeric `chown` and a harmless restore probe. The normal
+  installer path is unaffected and the current test token was not changed during this bridge.
 - Collapse Caddy→Nginx to loopback HTTP and remove the inner certificate, Certbot volume, inactive
   units and unreachable legacy renewal lifecycle after two source-clean rollback releases exist.
 - User-facing data export/delete and ordered disaster-recovery semantics.

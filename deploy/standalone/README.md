@@ -13,11 +13,80 @@ Internet
   -> SPA or bot API on the internal Compose network
 ```
 
-Nginx also binds `127.0.0.1:8080`, but Caddy must stay on `8443` until two
-source-clean rollback releases exist. Moving Caddy to `8080` now would lose the
-complete API policy and could break a rollback. Caddy verifies the retained
+Nginx also binds `127.0.0.1:8080`. Two source-clean rollback releases now exist,
+but moving Caddy to `8080` remains a separate migration: the complete inner API
+policy and rollback behavior must be preserved. Caddy verifies the retained
 inner certificate and SNI through the host trust store; it also owns the public
 certificate and renewal.
+
+## Verified checkpoint — 2026-09-06
+
+Source `5774b01` is deployed as current B `20260906T071101Z`, with previous
+A `20260906T071100Z`. Both releases are authority-capable. The persisted ledger
+mode is still `local`; server activation and canonical imports have not run.
+
+- Docker perimeter apply passed at `07:15:41Z`; Caddy hardening passed at `07:17:30Z`.
+- A activated at `07:22:17Z`, then B at `07:23:53Z`, with stable health and
+  inner/outer TLS/API smoke. Key-only SSH, UFW `22/80/443`, loopback `8080/8443`,
+  no bot host port, exact daemon policy and `jq 1.8.1` were verified.
+- Caddy now uses its `0200` Unix admin socket, `persist_config off`, and `h1/h2`.
+  Trusted inner TLS and client-IP recovery are active; legacy Certbot units stay quiescent.
+- Root-only WAL-safe backups were created before A at `07:20:46Z` and before B at
+  `07:22:22Z`, under `/srv/cometa-bank/backups` on the same VPS.
+- Both own Telegram Old profiles, Nikita and MetaFlexer, persisted B's compiled
+  client marker. Nikita's 438 rows were preserved exactly; MetaFlexer's 437 rows
+  gained only one interest row. These profiles were not identified as John Cometa.
+- Ten isolated production-browser checks passed. Real MetaFlexer foreground QA
+  then exposed a lifecycle self-abort leaving the Mini App `read_only`.
+
+Candidate `2897de5` retains those foreground/coordinator/import-cutover fixes and
+resolves all three confirmed v18 findings: truthful RU/EN pending copy on the
+same card, accessible focus/announcement via `aria-disabled` plus a click guard,
+and first SDK discovery at 16 seconds when the SDK appears at 15 seconds after
+the retry ladder is exhausted. Stale timers are cleared while request budgets
+and known-identity cooldown remain intact. CLAUDE invariants were committed
+separately as `ae9c65e`.
+
+Full `pnpm verify` passed: 799 tests (577 web + 222 bot). V19's terminal cold-session
+guard was fixed with a red/green compiling mutant. Its continuous-progress visual
+preference was rejected after unchanged Chrome geometry/focus and an explicit
+CLAUDE invariant. Immutable real-browser verification passed 5 scenarios / 19 checks:
+`/private/tmp/cometa-foreground-browser-2897de5-4ZzXID/report.json`.
+The candidate is not deployed. Original reviewer v20 did not run because of session quota;
+`/private/tmp/claude-paired-review-final-20260906-v20/raw.json` reports reset
+`17:10 Asia/Bangkok`. The exact Opus 5 retry finished at `10:18Z`: `clean`, zero
+findings, resolved source `2897de5`. Evidence:
+`/private/tmp/claude-paired-review-final-20260906-v20-retry/report.json` and `meta.json`.
+Actual model is `claude-opus-5`; requested effort xhigh, verified effort unobservable.
+Nine signed checks passed again at `10:05Z`; live health and LOCAL/zero imports
+were reconfirmed at `10:08Z`.
+
+This is not final Telegram acceptance. The next release uses the already-hardened
+normal lifecycle with TWO new identical-source releases; do not repeat the one-time
+Docker/Caddy migration. Do not activate or overwrite superseded prepared releases
+`20260906T075300Z`/`20260906T075301Z` from `aab2dc0`. Uploaded
+`20260906T092401Z`/`20260906T092402Z` from `de36540` are also superseded: do not
+prepare or activate them. The unused `5838c51` pair `20260906T094101Z`/`20260906T094102Z`
+is also superseded. The final `2897de5` pair is `20260906T095601Z`/`20260906T095602Z`:
+both packages were uploaded at `10:19Z`, local/remote checksum checks pass, and their
+extracted source trees are identical by `diff -qr`. A package SHA-256:
+`d76e6c535e9e77192d66272011473fbcb221ef38ea2d0314847d0b71955dbe93`.
+B package SHA-256:
+`547025dc4bcf77a465bacb8a89aaf8b02025fb5e0eff18eaf4d6940c0c488175`.
+Strict preflights are running; neither final release is activated yet. Finish the
+normal release cycle without starting a new improvement/review cycle. Keep authority local until both
+rollback slots contain the final fix and both native profiles pass new compiled
+markers, foreground/reopen and snapshot preservation.
+The new current→previous→current data-persistence rehearsal and Android/iOS acceptance
+remain open. `docs/handoff.md` is the evidence log; `docs/next-phase.md` is the resume order.
+
+Native inline coordinate clicks return `-10005` in Telegram Old and the separately
+owner-authorized main Telegram.app. Nikita's Cometa chat opened via Cmd+K/Return,
+but the English click failed again at `10:07Z`. AX open Mini App works; both Old
+profiles retained their exact 438-row snapshot hashes at `10:05Z`. The Browser
+plugin lists no connected browsers. The request to connect one through Settings →
+Computer use and log in to Web Telegram is unanswered. Main Telegram and Web are
+explicitly authorized; John Cometa has not been identified.
 
 ## Runtime layout
 
@@ -84,12 +153,14 @@ replace the whole host file merely to match
 `jq` is a required host dependency because the Compose and Caddy contracts are
 validated from structured output.
 
-## Package two bridge releases
+## Package two identical-source releases
 
 Run the complete project gate once, then package the same clean source under
 two distinct UTC release IDs. The packager runs `pnpm verify` again, rejects
 credential-shaped content and symlinked inputs, and emits a checksum next to
-each credential-free archive.
+each credential-free archive. It packages the live allowlisted source files,
+not a Git commit export: freeze the source and included documentation before
+creating both archives.
 
 ```bash
 ./deploy/standalone/scripts/package-release.sh --release-id <bridge-a>
@@ -111,8 +182,8 @@ documentation.
 
 ## Existing-host prerequisites
 
-This lifecycle currently supports only the staged migration of an existing,
-healthy Irena runtime. It deliberately rejects a host without `current`, a
+This lifecycle supports upgrades of the existing, healthy Irena runtime.
+It deliberately rejects a host without `current`, a
 running web container, and the installed edge contract. It is not a complete
 first-install bootstrap path.
 
@@ -139,10 +210,33 @@ sudo tar -xzf cometa-bank-<release-id>.tgz \
   -C /srv/cometa-bank/releases/<release-id> --no-same-owner
 ```
 
-The first strict preflight will intentionally fail while the legacy edge still
-uses the old trust, admin, client-IP, and Docker-daemon semantics. Install the
-Docker perimeter and run the one-time edge hardening below from bridge A first;
-later releases go directly through strict preflight.
+During the original bridge, strict preflight intentionally failed until the
+legacy trust, admin, client-IP and Docker-daemon semantics were migrated. That
+one-time prerequisite is complete on Irena; later releases go directly through
+strict preflight rather than repeating the migration below.
+
+## Normal release cycle on hardened Irena
+
+After final review, upload and checksum-verify two new identical-source archives.
+Use fresh `<final-a>` and `<final-b>` directories; never overwrite an old release.
+Prepare both before activating either, and keep ledger mode `local` throughout:
+
+```bash
+sudo /srv/cometa-bank/releases/<final-a>/deploy/standalone/scripts/host-preflight.sh --ssh-port 22
+sudo /srv/cometa-bank/releases/<final-b>/deploy/standalone/scripts/host-preflight.sh --ssh-port 22
+sudo /srv/cometa-bank/releases/<final-a>/deploy/standalone/scripts/release.sh prepare
+sudo /srv/cometa-bank/releases/<final-b>/deploy/standalone/scripts/release.sh prepare
+sudo /srv/cometa-bank/releases/<final-a>/deploy/standalone/scripts/release.sh activate
+sudo /srv/cometa-bank/releases/<final-b>/deploy/standalone/scripts/release.sh activate
+sudo /srv/cometa-bank/current/deploy/standalone/scripts/release.sh status
+sudo /srv/cometa-bank/current/deploy/standalone/scripts/release.sh ledger-mode status
+```
+
+Require current B / previous A to contain the final fix, with normal activation
+backups, stable health and both TLS/API boundaries passing. Repeat compiled-marker,
+foreground/reopen and snapshot-preservation checks in both real profiles before
+the first one-way server activation. No Docker/Caddy migration or token replacement
+is part of this normal release cycle.
 
 ## Install the Docker daemon perimeter
 
@@ -176,10 +270,11 @@ same application perimeter before retiring the journal.
 
 ## Controlled Irena bridge
 
-The live C/D directories were manually patched to loopback ports. They are
-runtime-compatible with Caddy but are not source-clean and still contain the
-old Certbot-aware operator script. Replace both rollback slots in one
-maintenance cycle:
+This bridge completed on 2026-09-06 with the A/B pair recorded above. The old
+C/D directories were manually patched to loopback ports and contained the old
+Certbot-aware operator; they are no longer current/previous. The following
+sequence documents the completed migration and its recovery rules, not the next
+release task. Its replacement of both rollback slots used one maintenance cycle:
 
 1. Extract both A and B. From A, dry-run and apply
    `install-docker-perimeter.sh`; this includes one controlled Docker restart.
@@ -278,8 +373,8 @@ Other lifecycle commands fail closed while an intent is pending.
 ## Bot token
 
 The existing test token may remain for the owner-approved test cycle. Before
-any non-test use, revoke it in BotFather and install the replacement through
-the hidden-TTY boundary:
+any non-test use, fix and test the dormant restore portability issue below,
+then revoke it in BotFather and install the replacement through the hidden-TTY boundary:
 
 ```bash
 sudo /srv/cometa-bank/releases/<release-id>/deploy/standalone/scripts/release.sh install-token
@@ -288,6 +383,14 @@ sudo /srv/cometa-bank/releases/<release-id>/deploy/standalone/scripts/release.sh
 The installer validates `getMe` against the configured bot identity and
 atomically writes a UID `10001`, mode `0600` regular file. Image rollback
 preserves the installed file and never restores a revoked credential.
+
+Deferred portability issue: `deploy/bot/install-secret.sh:146`, in
+`restorePrevious`, uses `install -o 10001 -g 10001`. Irena's uutils `0.8.0`
+rejects that form because UID/GID `10001` have no NSS entries. The normal
+installer path is unaffected and the bridge did not change the current token.
+Before rotation, replace that restore copy with root-owned installation followed
+by numeric `chown`, and verify it on isolated scratch files without touching the
+live credential.
 
 ## Operations
 
@@ -308,9 +411,14 @@ mutate the public edge or certificate owner.
 
 ## Enable server ledger authority
 
-Only enable authority after A and B are both live-compatible rollback targets
-and both real Telegram profiles have persisted the expected compiled client
-marker.
+Only enable authority after two NEW identical-source releases carrying the final
+reviewed fix are current and previous, and both real Telegram profiles have
+persisted the final compiled client marker. The earlier bridge markers do not
+cover candidate `2897de5`. The 799-test gate and immutable browser pass are green;
+v19's terminal guard is fixed and its visual preference rejected with evidence.
+The exact Opus 5 retry after v20's quota failure passed clean at `10:18Z`.
+Post-deploy native foreground/reopen and snapshot preservation remain required
+before the first applying command below.
 
 ```bash
 sudo /srv/cometa-bank/current/deploy/standalone/scripts/release.sh ledger-mode status
@@ -341,13 +449,21 @@ Server authority is accepted only after two real Telegram profiles prove:
 - restart and B-to-A-to-B persistence;
 - unchanged device-local web demo data.
 
-Telegram messages, callbacks, and screenshots require separate action-time
-owner confirmation. Add exactly three sanitized real Telegram captures to the
+The owner explicitly authorized mock-bot QA in the own Nikita and MetaFlexer
+profiles, including messages, callbacks and screenshots. Do not request blanket
+approval again for each such step; unrelated external actions are outside that
+authorization. Add exactly three sanitized real Telegram captures to the
 root README only after these journeys pass. Browser emulation does not replace
 Android and iOS Telegram WebView acceptance.
+
+The two current local showcase visuals use actual web screenshots and an
+explicitly illustrative Telegram preview with exact bot-engine copy. The preview
+is not a native Telegram capture or acceptance evidence. Keep that label and the
+provenance in `docs/assets/showcase/README.md` until real-client journeys are captured.
 
 The same-host SQLite backup is not disaster recovery. Encrypted offsite backup,
 retention monitoring, and an epoch-rotating restore drill are deferred. A later
 task will also move Caddy to loopback HTTP and delete the redundant inner
 certificate, Certbot volume, inactive units, and unreachable legacy renewal
-code after two clean rollback releases are established.
+code in a separate post-bridge migration; the two clean rollback slots alone do
+not authorize changing that retained API/TLS policy.

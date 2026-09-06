@@ -1,110 +1,67 @@
 # Cometa
 
-A personal multi-currency banking sandbox for the web and Telegram.
+A personal banking sandbox for the web and Telegram.
 
-[Live demo](https://euphoria.bot) · [Telegram bot](https://t.me/MyBankApp_Bot)
+[Open the demo](https://euphoria.bot) · [Meet the bot](https://t.me/MyBankApp_Bot)
 
-<p align="center">
-  <img src="docs/assets/showcase/hero.png" alt="Cometa multi-currency mock bank across home, transfer, and history screens" width="100%">
-</p>
+<img src="docs/assets/showcase/app-showcase.png" alt="Three real Cometa screens: balances and USD equivalent, a KZT to USD transfer, and searchable merchant history" width="100%">
 
-Cometa explores how a small personal finance product can feel calm, fast, and useful. It combines
-realistic data, functional money flows, and a Telegram-native launch experience without connecting
-to a bank or moving real money.
+Realistic merchants. Useful money flows. No real money.
 
-## Inside the demo
+## Make it yours
 
-- Eight authentic currency fixtures with comparable USD economics
-- Four starting accounts, plus reversible account creation, closing, and restoration
-- Portfolio totals in KZT, THB, VND, RUB, USD, EUR, IDR, or GEL
-- A dedicated USD equivalent for every active non-USD account
-- Daily reference rates with a deterministic offline fallback
-- Own-account FX transfers with an immutable rate snapshot
-- Simulated contact transfers with retry-safe submission
-- Searchable history, pending operations, and custom merchant artwork
-- Mock Visa and Mastercard cards with freeze controls
-- Calendar-based savings interest recorded directly in the ledger
-- Manual income, expenses, and monthly recurring entries on checking accounts, with UTC backfill
-- No-overdraft checks and savings corrections applied after interest settlement
-- A complete Russian and English interface
+- **Eight currencies:** KZT, THB, VND, RUB, USD, EUR, IDR and GEL, with locally familiar merchants and comparable starting wealth in USD.
+- **Four starting accounts:** spending, savings and two companion currencies. Add more, adjust a balance, or close and restore an empty account.
+- **A clear money view:** account-level USD equivalents, portfolio totals, daily reference rates and an offline fallback.
+- **Functional mock banking:** own-account FX, contact transfers, searchable history, savings interest and card freeze controls.
+- **Russian or English:** a complete interface in either language.
 
-## Telegram Mini App
+Your onboarding currency chooses the initial demo. Changing the display currency later leaves your accounts and history intact.
 
-The next release candidate turns the companion bot into a compact command center for the demo:
-record an income or expense, backfill a monthly subscription, inspect recurring entries, or manage
-accounts without leaving the chat. The live bot still uses the accepted device-local baseline until
-the guarded two-release rollout and real-profile acceptance are complete.
+## A bank, one chat away
 
-In the candidate, Telegram launch data is verified by the backend. The first authenticated device
-snapshot becomes canonical; after activation, bot and Mini App commands share one
-server-authoritative mock ledger isolated by Telegram ID. A different pre-authority copy on another
-device is never uploaded or replaced silently. Native Main Button, Back Button, viewport, theme, and
-haptic behavior remain behind the same platform contract used by the web app.
+<img src="docs/assets/showcase/telegram-showcase.png" alt="Three sanitized Telegram product previews in one row: onboarding, a monthly Spotify expense with backfill, and reversible account management" width="100%">
 
-<p align="center">
-  <img src="docs/assets/showcase/telegram-onboarding.png" alt="Sanitized illustration of the Cometa Telegram onboarding flow" width="390">
-</p>
+<sub>Illustrative Telegram layout with exact replies captured from the bot engine. These are product previews, not production Telegram screenshots.</sub>
 
-<p align="center"><sub>Sanitized reconstruction using the bot's current production copy. No personal Telegram profile data is shown.</sub></p>
+The release candidate adds three chat flows, pending production activation:
 
-## Product screens
+- `/add` records an expense or income: account, merchant or sender, note, amount and UTC date.
+- Monthly entries can start in a past month. Preview the backfill before confirming; `/recurring` keeps the schedule manageable.
+- `/accounts` adds accounts, adjusts balances, and reversibly closes or restores them.
 
-<p align="center">
-  <a href="docs/assets/showcase/home.png"><img src="docs/assets/showcase/home.png" alt="Multi-currency account overview" width="31%"></a>
-  &nbsp;
-  <a href="docs/assets/showcase/history.png"><img src="docs/assets/showcase/history.png" alt="Searchable transaction history with a pending subscription" width="31%"></a>
-  &nbsp;
-  <a href="docs/assets/showcase/transfer.png"><img src="docs/assets/showcase/transfer.png" alt="KZT to USD transfer quote" width="31%"></a>
-</p>
+Expenses and recurring entries use checking accounts. Savings corrections settle interest first.
+No operation can push a mock account below zero. Confirmations are retry-safe.
 
-<p align="center">
-  <a href="docs/assets/showcase/cards.png"><img src="docs/assets/showcase/cards.png" alt="Interactive mock cards" width="40%"></a>
-  &nbsp;&nbsp;
-  <a href="docs/assets/showcase/settings.png"><img src="docs/assets/showcase/settings.png" alt="Language, primary currency, and reference-rate settings" width="40%"></a>
-</p>
+The Mini App shares the same ledger with the bot once server authority is enabled. Each signed
+Telegram profile has its own history; the first imported device snapshot becomes canonical.
+A different existing device copy is never replaced silently. The standalone web demo stays local.
 
-## Under the surface
+## Built to stay consistent
 
-```text
-React application
-├── domain       integer money, ledger, FX, recurrence, account lifecycle
-├── store        local web state and guarded Telegram authority sync
-├── platform     interchangeable web and signed Telegram adapters
-├── interface    mobile-first screens, sheets, and custom visuals
-└── bot          Node.js, SQLite, chat flows, signed bank commands
-```
+Balances come from an append-only ledger, not a second mutable balance field. Money uses integer
+minor units. FX transfers retain the rate used at confirmation. Server revisions and idempotent
+commands protect concurrent updates and retries; Web Locks serialize local browser tabs.
 
-Balances are derived from the transaction ledger instead of stored twice. Money uses integer minor
-units, completed FX transfers retain their exact rate snapshot, and client transfer IDs make retries
-idempotent. Web Locks serialize cross-tab mutations before persistence.
+React 19 · TypeScript 6 · Vite · Tailwind CSS v4 · Zustand · Radix Dialog ·
+`@tma.js/sdk-react` · Node.js 22 · SQLite · Vitest
 
-The browser and Telegram environments meet through a narrow platform seam. Web data stays local.
-After the guarded authority switch, Telegram stores a revisioned mock snapshot and a bounded
-idempotency window per authenticated profile. Balances are never written as independent account
-fields.
+## Demo, deliberately
 
-The live SQLite database and its release-time backups currently share one VPS. Losing Irena in full
-can therefore lose Telegram demo changes; encrypted offsite backup and a restore drill are the next
-infrastructure milestone, not a capability claimed by this demo.
+No payment rails, bank connections, KYC or financial services.
 
-Vite · React 19 · TypeScript 6 · Tailwind CSS v4 · Zustand · Radix Dialog · `@tma.js/sdk-react` ·
-Node.js 22 · SQLite · Vitest
+The KZT fixture contains 437 deterministic transactions after initial interest settlement. It
+includes a sanitized personal statement: names, account and card details, statement identifiers
+and booking references were removed. Exact dates, merchants and amounts remain fingerprintable.
+This is a deliberately disclosed public dataset, **not anonymous data**. The other seven currency
+fixtures are fully synthetic.
 
-## Data boundary
-
-Cometa is an interactive mock. It has no real money, payment rails, bank connections, KYC, or
-financial services.
-
-The KZT fixture ships with 437 deterministic demo transactions after initial interest settlement.
-Part of the fixture comes from a
-sanitized personal statement: names, account details, card details, statement identifiers, and
-booking references were removed, while exact dates, merchants, and amounts remain fingerprintable.
-This public repository therefore contains a deliberately disclosed, fingerprintable dataset; it
-must not be described as anonymous. The seven non-KZT fixtures are fully synthetic.
+SQLite and release-time backups currently share one VPS. Full loss of that server can lose Telegram
+demo changes. Encrypted offsite backup and a tested disaster-recovery procedure are still planned.
 
 ## Run locally
 
-Requires Node.js 22 and pnpm 11.
+Node.js 22 and pnpm 11 are required.
 
 ```bash
 pnpm install --frozen-lockfile
@@ -112,19 +69,13 @@ pnpm dev
 pnpm verify
 ```
 
-Bot and VPS setup use separate secret-safe runbooks:
+[Bot setup](deploy/bot/README.md) · [VPS deployment](deploy/standalone/README.md) ·
+[Project handoff](docs/handoff.md)
 
-- [`deploy/bot/README.md`](deploy/bot/README.md)
-- [`deploy/standalone/README.md`](deploy/standalone/README.md)
+## Release status
 
-## Status
-
-The web and existing Mini App baseline are live and unchanged. The eight-fixture ledger, per-profile
-Telegram authority, and RU/EN transaction, recurrence, and account flows are implemented in the
-next release candidate. Its product behavior passed the last integrated test snapshot; the final
-Docker/Caddy perimeter changes still need the complete gate and immutable review.
-
-Deployment remains pending. The controlled rollout installs the local-only Docker daemon perimeter,
-hardens the Caddy edge, prepares and activates two rollback-compatible releases while authority stays
-local, and only then enables the one-way server ledger. Real two-profile journeys, three sanitized
-production chat captures, and current Android/iOS WebView acceptance remain open.
+The accepted web and Mini App baseline is live. The expanded Telegram ledger is a release candidate:
+799 automated tests pass, alongside web-browser, signed real-backend, foreground-recovery and
+first-import scenarios. Late Telegram SDK availability also recovers without reloading.
+Production activation and real two-profile Telegram acceptance are still pending. Browser emulation
+does not establish Android or iOS WebView acceptance.

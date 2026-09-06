@@ -1,9 +1,29 @@
 # Telegram ledger and currency templates — анализ и план
 
-Date: 2026-09-05. Status: Gate 1 approved; the implementation candidate is local only. Product
-behavior and the prior deploy snapshot passed integrated verification and local browser QA. The
-newer Docker/Caddy perimeter changes still need the final integrated gate and immutable repeat;
-owner acceptance and production activation are pending.
+Date: 2026-09-06. Gate 1 approved. Source `5774b01` is live on Irena as current B
+`20260906T071101Z`, with previous A `20260906T071100Z`; both are authority-capable and the
+Docker/Caddy bridge is installed. Persisted `ledger_mode` remains `local`; canonical imports and
+server activation have not run. Real Telegram foreground QA exposed frontend recovery bugs in B.
+
+Frozen runtime candidate `2897de5` passed `pnpm verify` at `09:55Z`: 799 tests (577 web + 222 bot).
+Opus v19 returned two P3 findings, not clean: the terminal-cold retry defect is fixed and the
+recovery-copy finding is rejected with browser evidence and the intended UX contract. All v19 items
+are adjudicated. The final immutable browser replay passed five scenarios / 19 checks with zero
+runtime errors; nine signed-backend browser checks also passed on `2897de5` at `10:05Z`.
+The exact Opus 5 v20 retry returned clean at `10:18Z` on `2897de5`, with no findings; the original
+v20 stopped before review on a session limit. The review gate is closed. Normal deploy is starting,
+not yet verified complete. New archives `20260906T095601Z` and
+`20260906T095602Z` are built, with identical extracted source and passing checksums.
+Both were uploaded at `10:19Z`; remote checksums, source parity and strict preflights passed.
+Neither is activated. Both owner snapshots still matched their 438-row parity hashes
+at `10:05Z`; production was healthy and in local mode at `10:08Z`.
+Uploaded `5838c51` archives
+`20260906T094101Z` / `20260906T094102Z` passed source/checksum checks and both preflights but were
+never prepared or activated. They and the earlier `de36540` pair `20260906T092401Z` /
+`20260906T092402Z` are superseded and must not be activated. The rejected v16 rates finding retains
+its evidence-backed disposition from Revision 29. Earlier browser evidence remains scoped to its
+recorded snapshots. Real-profile retests, native assistive-technology checks and Android/iOS
+acceptance are pending; see `docs/handoff.md` for live state.
 
 ## TL;DR
 
@@ -20,15 +40,17 @@ signed bootstrap extension, one-time import текущего TMA v4 snapshot, st
 real two-profile acceptance и новый README-row из трёх Telegram
 screenshots.
 
-The release bridge now has a separate one-time host prerequisite before `harden-edge`: bridge A
-runs `install-docker-perimeter.sh` dry-run/apply, which performs one controlled Docker restart under
-a root-only durable install/rollback journal. It requires Docker Engine 28+, the exact versioned
+The one-time release bridge completed on Irena: bridge A ran `install-docker-perimeter.sh`
+dry-run/apply before `harden-edge`, including a controlled Docker restart under a root-only durable
+install/rollback journal. The installed contract requires Docker Engine 28+, the exact versioned
 three-key daemon JSON, one systemd-activated `-H fd://` endpoint and a pinned local Unix-socket CLI.
 Only exact, secure `.pending.next` and `daemon.json.cometa-bank.next` producer states can be
 reconciled; ambiguous state fails closed. `harden-edge` then applies host-wide `h1/h2`, trusted inner
 TLS and real-IP semantics, moves Caddy admin from legacy loopback TCP to a caddy-owned Unix socket
 with mode `0200`, disables config persistence and reloads through the endpoint currently serving.
-None of this candidate infrastructure has been applied to Irena.
+Docker perimeter apply passed at `07:15:41Z`, Caddy hardening at `07:17:30Z`, A activation at
+`07:22:17Z` and B activation at `07:23:53Z`, with stable health and inner/outer TLS/API smoke.
+The next frontend release uses this hardened lifecycle; it does not repeat the one-time host migration.
 
 ## 1. Что строим и зачем
 
@@ -88,9 +110,9 @@ Accounts → account detail → Adjust balance / Close account
 `/recurring` начинают новый flow и заменяют старый draft. Draft переживает restart и истекает через
 24 часа; смена языка также заменяет его новым localized dashboard.
 
-## 2. Local implementation checkpoint
+## 2. Implementation and release checkpoint
 
-The local candidate now implements the approved contract:
+The approved implementation contract spans the deployed bridge and the unreleased foreground fixes:
 
 - `BankState` schema 5, eight deterministic base-currency fixtures and explicit v4 migration. The
   owner KZT fixture keeps its frozen balance and ordering; later primary-currency changes affect
@@ -124,7 +146,14 @@ The local candidate now implements the approved contract:
 - The client treats a raw Telegram session fingerprint change as an identity epoch before trusting
   the possibly stale parsed user signal. Same-user foreground sync preserves valid navigation and
   drafts; every canonical state adoption reconciles account/card/transfer targets, while a real
-  namespace change resets transient UI.
+  namespace change resets transient UI. The candidate fixes the real-foreground self-abort and
+  adds one shared bootstrap/recovery budget, durable copy-decision preservation and locked import
+  cutover, plus late-first-fingerprint and in-flight progress handling; deployed B has not received
+  these fixes yet. Revisions 30–32 distinguish the prior verified snapshots from committed
+  `2897de5`, which also preserves terminal-cold failure after mid-attempt SDK arrival: 799 tests
+  pass, final immutable browser checks pass, and all v19 items are adjudicated. The exact-model
+  v20 retry returned clean with no findings at `10:18Z`; the original session-limit failure remains
+  historical. The candidate's review gate is closed, not its deploy or native acceptance gates.
 - History keeps a reversibly closed account selectable and exposes its localized `закрыт` /
   `closed` status in the account button's accessible name. The visual circle is hidden from the
   accessibility tree, and active-account names remain free of a status suffix.
@@ -133,9 +162,14 @@ The local candidate now implements the approved contract:
   `200`; zero horizontal overflow or console errors/warnings; fitted dialogs and visually clean
   captures. A `1,00 ₸` internal KZT transfer was reset and the original fixture restored.
 
-This candidate has not been deployed or activated. Remaining gates are the immutable post-fix review,
-two authority-capable bridge releases, the guarded one-way server switch, two-profile Telegram
-acceptance and the three real README captures. Local browser QA is not Telegram/TMA acceptance.
+The A/B bridge is deployed, but authority is still disabled. Both own Telegram Old profiles,
+Nikita and MetaFlexer, persisted B's compiled marker; Nikita's 438 rows remained identical and
+MetaFlexer's 437 gained only one interest row. Neither profile was identified as John Cometa.
+Remaining gates are a verified fresh release of the reviewed candidate, real foreground/reopen
+and snapshot-preservation retests, then the
+one-way server switch and first imports. Mutation
+journeys, rollback persistence and accepted live captures follow. Chromium with synthetic Telegram
+transport does not substitute for native Telegram or Android/iOS acceptance.
 
 ## 3. Варианты — сравнение
 
@@ -600,14 +634,14 @@ exists.
 | Milestone | Scope | Definition of Done | Проверка | Deploy gate | Статус |
 |---|---|---|---|---|---|
 | M0 — baseline + design | Time-safe rate fixture, code audit, design and adversarial revision | Full baseline green; revised plan approved | `pnpm verify`, `git diff --check` | Нет | done |
-| M1 — domain v5 + templates | Account/card lifecycle reasons, `demoBaseCurrency`, `fixtureId`, manual/adjustment transitions, safe recurring materializer, v4→v5 migration, eight seeds | KZT 436→437 lifecycle preserved; synthetic fixtures do not encode statement rows; pinned parity holds; savings/date/capacity contracts hold | Domain/persistence tests, named mutants, full verify | None | implemented locally; final gate pending |
-| M2 — authority core | Shared bot bundle, additive SQLite tables, strict import, hashed idempotency, monotonic epoch/revision, signed bank API | Create-if-absent import preserves v4; atomic per-user commands; retry/collision/limit/restore cases typed; old DB opens | Repository/HTTP tests, migration/fallback harness, Opus money/concurrency review | Images only; service flag local | implemented locally; final gate pending |
-| M3 — TMA sync | Platform command seam, sticky server receipt, ordered canonical adoption, foreground sync, web remains local | No local fallback after authority; stale response rejected; two IDs isolated; conflicting second-device import fails closed | Store/adapter tests, two-context Playwright TMA emulation, mutants | Local only | implemented locally; final gate pending |
-| M4 — transaction + recurrence bot UX | `/add`, `/recurring`, durable wizard, year/month/day backfill, typed outbox, RU/EN copy | Checking income/expense/date/monthly/backfill/pause/resume/cancel work across restart and retry; expense never overdraws or partially backfills | Bot behavior tests, parser/balance boundaries, stale/foreign callbacks, two-user tests | Local only | implemented locally; final gate pending |
-| M5 — accounts bot UX | `/accounts`, add, adjust, close/restore, client UI reconciliation | Zero-balance close invariant, history retained, manual freeze/pause preserved, savings settles before current adjustment | Domain/bot/UI tests, one-account and closed states, Opus focused review | Local only | implemented locally; final gate pending |
-| M6 — product polish | History effective dates/notes, immutable warning context, backend-only FX, operation-cap recovery and responsive QA | RU/EN readable at 320×568/390×844; no blocked bootstrap/materialization at capacity; full local journeys pass | Playwright, accessibility/overflow, `pnpm verify`, final paired review | Local only | local web QA passed; final review pending |
-| M7 — bridge release | Prepare two source-identical A/B releases; install the exact Docker daemon perimeter; harden the legacy Caddy/Nginx edge; keep authority local | Docker 28+ uses only systemd `-H fd://` and canonical daemon JSON; Caddy owns public TLS plus a `0200` Unix admin socket with persistence off, verified inner TLS and host-wide `h1/h2`; exact loopback runtime, trusted real IP and quiesced renewal hold; current/previous become source-clean | Installer dry/apply with controlled restart and durable recovery; transactional `harden-edge` dry/apply through current admin endpoint; strict A/B preflight/prepare/activate; inner/outer smoke; pinned A operator on legacy fallback | Explicit deploy confirmation; recovery/failure harnesses; two consecutive activations; no ledger import | source contract implemented locally; final gate and deploy pending |
-| M8 — live acceptance + showcase | Switch service flag, import both owner profiles, feature B→bridge A→feature B mutation probe, RU/KZT and EN/GEL chat journeys, three real captures | A/B ledgers differ and survive restart/rollback; web demo unaffected; README has exactly three equal sanitized Telegram images in one row | `pnpm verify`, live API/TLS, Telegram Old Computer Use, owner Android/iOS gate, screenshot guard | Activate only after all prior gates green | not started |
+| M1 — domain v5 + templates | Account/card lifecycle reasons, `demoBaseCurrency`, `fixtureId`, manual/adjustment transitions, safe recurring materializer, v4→v5 migration, eight seeds | KZT 436→437 lifecycle preserved; synthetic fixtures do not encode statement rows; pinned parity holds; savings/date/capacity contracts hold | Domain/persistence tests, named mutants, full verify | None | deployed in A/B; preservation checks passed |
+| M2 — authority core | Shared bot bundle, additive SQLite tables, strict import, hashed idempotency, monotonic epoch/revision, signed bank API | Create-if-absent import preserves v4; atomic per-user commands; retry/collision/limit/restore cases typed; old DB opens | Repository/HTTP tests, migration/fallback harness, Opus money/concurrency review | Images only; service flag local | deployed in A/B; server mode and imports disabled |
+| M3 — TMA sync | Platform command seam, sticky server receipt, ordered canonical adoption, foreground sync, web remains local | No local fallback after authority; stale response rejected; two IDs isolated; conflicting second-device import fails closed | Store/adapter tests, two-context Playwright TMA emulation, mutants | Reviewed frontend release before authority | bridge deployed; 2897de5 has 799 tests, mutant and both final browser suites green; exact v20 clean at 10:18Z; normal deploy starting, authority still local |
+| M4 — transaction + recurrence bot UX | `/add`, `/recurring`, durable wizard, year/month/day backfill, typed outbox, RU/EN copy | Checking income/expense/date/monthly/backfill/pause/resume/cancel work across restart and retry; expense never overdraws or partially backfills | Bot behavior tests, parser/balance boundaries, stale/foreign callbacks, two-user tests | One-way server switch after M3 retest | deployed but disabled by local mode; live mutation QA pending |
+| M5 — accounts bot UX | `/accounts`, add, adjust, close/restore, client UI reconciliation | Zero-balance close invariant, history retained, manual freeze/pause preserved, savings settles before current adjustment | Domain/bot/UI tests, one-account and closed states, Opus focused review | One-way server switch after M3 retest | deployed but disabled by local mode; live mutation QA pending |
+| M6 — product polish | History effective dates/notes, immutable warning context, backend-only FX, operation-cap recovery and responsive QA | RU/EN readable at 320×568/390×844; no blocked bootstrap/materialization at capacity; full local journeys pass | Playwright, accessibility/overflow, `pnpm verify`, final paired review | Reviewed frontend release before native retest | 799 tests, five-scenario/19-check foreground replay and nine signed browser journeys green; stable geometry/focus proven; exact v20 clean, deploy/native acceptance pending |
+| M7 — bridge release | Prepare two source-identical A/B releases; install the exact Docker daemon perimeter; harden the legacy Caddy/Nginx edge; keep authority local | Docker 28+ uses only systemd `-H fd://` and canonical daemon JSON; Caddy owns public TLS plus a `0200` Unix admin socket with persistence off, verified inner TLS and host-wide `h1/h2`; exact loopback runtime, trusted real IP and quiesced renewal hold; current/previous become source-clean | Installer dry/apply with controlled restart and durable recovery; transactional `harden-edge` dry/apply through current admin endpoint; strict A/B preflight/prepare/activate; inner/outer smoke; pinned A operator on legacy fallback | Owner-authorized deployment; recovery/failure harnesses; two consecutive activations; no ledger import | completed: B `20260906T071101Z` current / A `20260906T071100Z` previous, source 5774b01, ledger local |
+| M8 — live acceptance + showcase | Switch service flag, import both preserved owner profiles, current→previous→current mutation probe, RU/EN chat journeys, three real captures | Profiles stay isolated and survive restart/rollback; web demo unaffected; README has exactly three equal sanitized Telegram images in one row | `pnpm verify`, live API/TLS, Telegram Old Computer Use, owner Android/iOS gate, screenshot guard | Reviewed foreground fix and real-profile retest before server switch/import | both B markers and baseline preservation verified; server/native mutation acceptance pending |
 
 Sensitive milestones M1–M5 receive an independent money/concurrency review immediately after focused
 tests. Final diff receives Codex review plus read-only Claude Opus 5 xhigh; every concrete finding is
@@ -636,6 +670,10 @@ equal 390×844 assets at 31% width.
    release backup remains; README/handoff must describe the residual single-VPS loss risk.
 
 ## 8. Ревизия 2026-09-05
+
+Revisions below retain the status of their original snapshots. The current production/candidate
+boundary is recorded at the top and in the latest revision; earlier "pending" or "not deployed" statements
+are historical, not instructions to repeat the completed host migration.
 
 Fresh-eyes audit отклонил первую редакцию: она допускала client-only fallback после authority,
 теряла существующий per-user v4 snapshot при первом server bootstrap, не защищала bank state от
@@ -871,4 +909,319 @@ mode and content are unambiguous, while mixed state fails closed. The strict Cad
 caddy-owned Unix admin socket at mode `0200` with `persist_config off`; legacy-to-strict and rollback
 reload through the currently live endpoint and compare the live canonical config to the installed
 file. Production remains unchanged. The Revision 26 integrated gate, immutable repeat and live
-acceptance are pending.
+acceptance are pending for that historical snapshot.
+
+Revision 27 closes the final product and deployment preview edges. Bank history now groups and
+labels all rows on the UTC calendar and renders UTC clocks, including old rows without
+`effectiveDate`. The owner fixture's Bangkok-origin timestamps remain byte-identical: its merchant
+opening-hour tests explicitly use the origin timezone, not the UI timezone. The suggestion to
+shift all fixture timestamps was rejected because it conflicts with the approved preservation and
+UTC rules. Test timezone changes assert that the runtime actually applied the requested zone.
+
+Docker dry-runs no longer promote or unlink valid recovery candidates. Socket inspection validates
+exact ownership/PID/cardinality before canonicalizing field padding with already-required `awk`,
+preventing cosmetic `ss` spacing changes from interrupting recovery. The independent Opus v10-v12
+findings have concrete regression/mutant coverage; v13 is clean on `5774b01` (session
+`77dde572-a114-46bb-94c7-dc10b311a275`, actual model `claude-opus-5`, requested xhigh).
+
+Latest evidence: 541 web + 222 bot tests, complete lint/typecheck/build/deploy guards, no known
+production dependency vulnerabilities, 10 web-browser checks and 9 synthetic signed authority
+browser checks. The full web suite passes in UTC and New York; the 49 fixture/format/History tests
+also pass in UTC+14. Three new bot cross-layer tests exercise the real SQLite repository, signed
+HTTP server, domain and onboarding/flow engines. Browser emulation is not a live Telegram or phone
+acceptance claim. Existing KZT balances and all 437 baseline transactions are preserved.
+
+Revision 28 records the real Telegram foreground defect and the final recovery candidate `9e29199`.
+The host bridge itself is complete: source `5774b01` runs as B `20260906T071101Z` with A
+`20260906T071100Z` previous, both authority-capable. Docker/Caddy apply and A→B health/TLS gates
+passed; root-only WAL-safe backups preceded both activations. Ledger mode is still `local`, with
+no imports. The frontend fixes below are committed and verified locally, but not deployed.
+
+The real MetaFlexer foreground pass exposed a self-aborting synchronization lifecycle that left
+the app `read_only`. The first repair kept same-ID bridge-local drafts mounted, but independent
+Opus v14 found two competing synchronization starters bypassing the shared attempt budget, loss
+of the explicit server-copy decision on foreground, and a post-unmount assertion that did not
+flush asynchronous listener work. Opus v15 found a genuine data-loss window: the mounted shell
+could still commit locally after the sticky authority marker and before import adoption. It also
+found that preserving the shell removed its incidental remount-driven exchange-rate refresh.
+
+The final fixes use one long-lived BootstrapGate coordinator for cold launch, retry and foreground
+signals, sharing the existing attempt budget, cooldown and coalescing. Raw identity changes enter
+quarantine immediately rather than waiting for an HTTP retry budget; obsolete requests cannot
+undo the newer isolation boundary. Verified same-ID local refresh preserves mounted drafts, and
+`server_copy_confirmation_required` survives unsuccessful refresh until the user decides. The
+coordinator remains alive while its shell is hidden, cleans up listeners on unmount and resumes
+settlement plus freshness-aware rate refresh only after successful visible synchronization, with
+abort/fingerprint/read-only checks before the rate leg.
+
+Import cutover freezes local mutations before taking the snapshot. Under the persistence lock it
+validates the active identity, persists the sticky marker and rebases from the latest durable state,
+including another tab's write whose storage event has not arrived. Local mutation callbacks check
+the authority boundary again inside the lock, so already-queued writes cannot reopen local mode
+after cutover. A rejected namespace or failed marker persistence never uploads a stale or foreign
+snapshot; the first accepted import remains canonical without merging or discarding prior writes.
+
+Verification for frozen `9e29199`: `pnpm verify` passed 561 web + 222 bot tests (783 total). Eight
+focused import-guard tests passed; removing the shared authority guard made six queued-write cases
+fail, and restoring it returned all eight cases to green. Five separate coordinator mutants were
+also killed. An immutable Chromium repeat passed six scenarios: cold local launch,
+same-ID draft preservation, raw identity switch, failed foreground network recovery with both caches
+intact, recovery from quarantined stale parsed identity, and absence of sticky markers/imports in
+local mode. Evidence: `/private/tmp/cometa-foreground-browser-snapshot-5XZWgL/report.json`.
+It uses the production frontend/SDK, signed HTTP and file-backed SQLite, but synthetic Telegram
+identities/transport and explicit document hidden→visible events; it is not native client acceptance.
+The nine signed authority-browser checks were rerun on `9e29199` and passed. A final New York
+lifecycle/store pass covered 95 tests; the UTC+14 seed/recurrence/format/History pass covered 56.
+A separate immutable Chromium cutover probe queued a real UI transfer behind a native Web Lock,
+started import through the production store/authenticated adapter, and verified read-only rendering
+before lock acquisition/upload. The queued transfer and subsequent writes added no rows; one real
+HTTP import and a reload preserved all 437 original transactions, with zero runtime errors.
+Evidence: `/private/tmp/cometa-foreground-browser-import-wu9RkX/report.json`. Its deterministic
+store-triggered cutover is browser evidence, not a real Telegram foreground journey.
+
+Baseline preservation remains proven separately on the real B launch: Nikita's existing 438 rows
+were unchanged, MetaFlexer's 437 gained exactly one interest row, and both retained their own B
+compiled marker. The intentional four-account/437-row fixture was not rewritten or reset, and no
+owner snapshot was imported to the server. At this Revision 28 checkpoint, Opus v16 was running for
+`9e29199`; its subsequent findings and adjudication are recorded in Revision 29. Native foreground/
+reopen journeys must prove snapshots unchanged before enabling authority. Server mutation journeys,
+current→previous→current persistence, accepted Telegram captures and Android/iOS remain pending.
+
+Revision 29 records candidate `f2e04ea` and the adjudication of Opus v16. Reviewer session
+`64e85be9-4d70-40b1-b444-c3d7787d9f75` used actual model `claude-opus-5`, requested `xhigh`, with
+verified effort `null` (unobservable), at a reported cost of USD `4.106533`. Its verdict contained
+four findings, not a clean pass. Findings 1, 3 and 4 were confirmed and fixed; finding 2 was rejected
+using the runtime policy and an executable limiter probe.
+
+- Finding 1: the first available raw fingerprint was treated as an account switch, aborting a cold
+  bootstrap and sending it into the 30-second foreground cooldown. Minimal first-observation
+  tracking now distinguishes first-ever SDK availability from a real identity change. It covers
+  both an in-flight initial attempt and a completed `absent` result: the former keeps its short
+  cold retry ladder, and the latter resumes that ladder when the first fingerprint arrives.
+- Finding 3: a terminal synchronization failure left `idleRefreshAllowed` set, so later foreground
+  edges kept retrying a permanent failure. The failure branch now clears that permission for
+  non-retryable errors; explicit recovery and a genuine identity change retain their intended paths.
+- Finding 4: a healthy foreground import switched the store to `read_only` while the gate rendered
+  a connection error and a Retry button that could cancel the import. An `onPendingChange` callback
+  and component-local progress state now distinguish in-flight synchronization from settled failure.
+  Healthy pending work shows progress, not Retry; an explicit server-copy decision remains available.
+  No new `bankStore` error code was added. Success, failure and timeout have three UI regression
+  tests; the compiling render mutant failed all three, and restoring it returned the tests to green.
+- Finding 2 alleged that foreground rate refresh would exhaust the authority budget. The actual
+  `/bank-rates` policy is 12 requests per minute (`bot/rate-limit.ts:51`), while the shared foreground
+  cooldown permits at most two starts per minute. The real limiter probe processed 120 foreground
+  plus 120 manual requests over an hour with zero 429s; its positive control rejected the thirteenth
+  request in one minute. Provider failure uses a 30-second retry cooldown, not the 12-hour successful
+  cache (`src/services/exchangeRates.ts`); the existing failed-load recovery test passed. Skipping
+  refresh merely because the snapshot is fallback/stale would suppress automatic provider recovery.
+  The suggested skip was therefore not implemented; normal rate limiting remains unchanged.
+
+`pnpm verify` passed at `08:56Z`: 570 web + 222 bot tests, 792 total, with the complete project gate.
+At the Revision 29 checkpoint, Opus v17 was running; its verdict is recorded in Revision 30. Five further compiling
+coordinator mutants were killed and the restored scratch passed 20 tests. The immutable `f2e04ea`
+browser repeat passed six foreground/draft/isolation checks, six first-import checks and late-SDK
+recovery in 1,301 ms with one bootstrap request. During the actual foreground-driven import, a
+legitimate queued UI transfer completed before snapshot capture: all 437 original rows plus its
+two transfer rows reached the canonical ledger and survived reload. In-flight import showed progress
+without Retry; no runtime errors occurred. The separate unchanged-store probe still verifies that a
+write granted after cutover is rejected. Evidence: `/private/tmp/cometa-foreground-browser-final-SZihmi/`.
+The nine signed authority-browser checks were also rerun on `f2e04ea` and passed. These are synthetic
+Telegram identities with real Chromium/SDK/HMAC HTTP/SQLite, not native Telegram acceptance.
+
+A private parity baseline copied at `08:48Z` records two origin snapshots with 438 rows each, no
+server imports or bank operations, and hash proofs. The evidence is retained at
+`/private/tmp/cometa-canonical-parity-baseline-20260906.json`; raw Telegram IDs and ledger data are
+not reproduced here. Production is unchanged: B/A still run `5774b01`, the hardened host bridge
+remains healthy and `ledger_mode=local`. Candidate review, final browser checks, deploy and real
+Nikita/MetaFlexer foreground retests precede server activation/import. Native mutation journeys,
+rollback persistence, accepted live captures and Android/iOS acceptance remain open.
+
+Revision 30 records the confirmed Opus v17 finding and a separate eventless cold-SDK regression.
+Reviewer session `3022df31-d850-41ce-8cf6-6d652a38bb70` used actual model `claude-opus-5`, requested
+`xhigh`, verified effort `null` (unobservable), at a reported cost of USD `3.484173`. Its verdict was
+one P3 finding, not clean. The rates-exhaustion claim from v16 remains rejected for the limiter and
+provider-recovery reasons documented in Revision 29; this follow-up does not change that decision.
+
+The confirmed P3 was recovery-card/splash churn: each automatic retry gap rendered an error card,
+then the next in-flight attempt replaced it with the splash, removing the Retry button and changing
+live announcements. Component `recoveryVisible` now keeps an already-shown recovery card and the
+same Retry DOM button mounted. The button is disabled while a request is pending, so it cannot
+cancel healthy work. Explicit server-copy approval stays available, and a first healthy import still
+shows initial progress rather than a false failure. Two App foreground regressions failed before
+the fix and passed after it. A compiling render mutant removing `recoveryVisible` failed those two
+cases; restoring the implementation returned them to green. The full gate passed 792 tests at
+`09:12Z`, before the additional cold-SDK fix below.
+
+The separate browser probe started with no SDK fingerprint and later supplied it without firing
+visibility/pageshow/online events. Before the fix the app remained stuck after 15,007 ms with zero
+HTTP bootstrap requests. A minimal result classification now treats `absent` as retryable only
+while no first raw session fingerprint has ever been observed, using the existing bounded
+1/3/8-second cold ladder instead of adding a polling loop or a new retry budget. Two regressions
+cover this path; removing that classification in a compiling mutant failed both, with the unrelated
+control still passing. The restored scratch passed 22 tests and app typecheck; focused verification
+covered 35 tests with typecheck and ESLint green.
+
+Real Chromium then recovered in 811 ms with one successful HMAC bootstrap (`200`), no injected DOM
+events and no runtime errors. Evidence:
+`/private/tmp/cometa-foreground-browser-noedge-BBlyWf/verification.json`. This used synthetic local
+Telegram transport; native-client trigger frequency was not measured and production was not mutated.
+The three-file follow-up is committed as `de36540`. Its full `pnpm verify` gate passed at `09:21Z`:
+572 web + 222 bot tests (794 total), production builds, CSS and deployment guards. The known
+521.55 KiB bundle-size warning is not a build failure. At this checkpoint immutable v18 was running
+in `/private/tmp/claude-paired-review-final-20260906-v18`; its findings are recorded in Revision 31.
+An immutable `de36540` Chromium replay passed six foreground and six first-import checks, plus
+eventless late-SDK recovery in 805 ms. The import preserved all original 437 rows and both rows of
+the legitimate pre-cutover UI transfer, rejected a new local writer during upload, sent exactly one
+successful import and reloaded the same 439 rows. There were no runtime errors. Evidence:
+`/private/tmp/cometa-foreground-browser-de36540-uQz4Aw/report.json`. The nine signed real-backend
+browser journeys were also repeated successfully on `de36540` at `09:26Z`, including two-user
+isolation, exact-money transfer, offline quarantine and recovery; injected network errors were
+expected, not uncaught runtime failures. `pnpm audit --prod` reported no known vulnerabilities.
+Both candidate archives, `20260906T092401Z` and `20260906T092402Z`, were built from a separate
+immutable `de36540` worktree, each rerunning all 794 tests. Local and uploaded extracted source
+trees compare identically. Both strict preflights passed; neither release was prepared or activated.
+The subsequent v18 findings superseded both archives: do not activate either `20260906T092401Z`
+or `20260906T092402Z`. A reviewed correction requires fresh immutable release IDs.
+At `09:27Z`, a read-only comparison of both real native snapshots again matched the private
+pre-deploy transaction/balance hashes: 438 rows each, with no server imports or mutation operations.
+Live B `20260906T071101Z` / A `20260906T071100Z`
+still run `5774b01`, with hardened host configuration, `ledger_mode=local` and zero canonical imports.
+Final verification/review, deploy, native owner-profile retests and server/phone acceptance remain
+open; earlier green snapshots do not prove this final follow-up accepted.
+
+Revision 31 records the v18 verdict and the completed corrective follow-up in frozen runtime
+commit `5838c51` (three source files; `CLAUDE.md` was committed separately as `ae9c65e`). Reviewer session
+`79d64eb2-0a9b-4987-a4b5-510417ee3605` used actual model `claude-opus-5`, requested `xhigh`, with
+verified effort `null` (unobservable), at a reported cost of USD `2.7545245`. Artifacts are
+`/private/tmp/claude-paired-review-final-20260906-v18/{report,meta}.json`. All three findings were
+confirmed; this was not a clean review.
+
+- P2: after a failed attempt, latched recovery state kept saying synchronization had failed and
+  nothing would change while a healthy first import was actively uploading. The correction keeps
+  the stable recovery card but switches its RU/EN heading and description to truthful progress
+  while pending, without false failure copy. It does not return to a splash or remove the user's
+  control. Settled failure copy also stops promising that nothing can change after an uncertain
+  network outcome.
+- P3: the same retry kept the live-region text unchanged and put busy state on a natively disabled
+  button, losing meaningful progress feedback and potentially focus. The correction retains the
+  same focusable DOM button, uses `aria-disabled` plus a click guard during pending work, and updates
+  the RU/EN progress text exposed by `role=status`. Explicit server-copy approval remains available;
+  the initial healthy import still shows initial progress rather than a recovery error. DOM/focus
+  regressions pass; native assistive-technology behavior has not been verified.
+- P3: after cold absence exhausted attempts at 0/1/4/12 seconds, the first raw SDK fingerprint
+  arriving at 15 seconds entered the ordinary foreground cooldown and waited until 42 seconds.
+  The minimal correction targets only first-ever raw availability after absence: arrival at
+  15 seconds now synchronizes at 16 seconds; arrival during the pending cold ladder at 5 seconds
+  synchronizes at 6 seconds. Stale cold and external-cooldown timers are cleared. The shared
+  attempt budget is unchanged; ordinary verified-session foreground behavior gains no bypass.
+
+The two extended App foreground tests cover failure/timeout → retry → active import → Home.
+They failed before the UI correction and then passed with the same DOM button/focus, no unintended
+abort and exactly one legitimate second import after the failed or timed-out first attempt.
+Fourteen focused UI tests, app typecheck and ESLint passed. A compiling copy mutant failed the two
+specific retry/import cases while the healthy-import control passed. Removing the click guard
+produced one primary failure proving an unwanted new bootstrap; the healthy control passed. The
+other combined-case cascade is not counted as independent evidence. Restored source passed all
+three import cases and typecheck. Two compiling first-SDK mutants each failed three specific tests
+with 23 passing: restoring the old guards delayed recovery; omitting timer cancellation duplicated
+requests. Restored source passed all 26 coordinator tests. Evidence is
+`/private/tmp/cometa-first-sdk-mutants-nV2n8e/report.json`.
+
+After the final copy correction, the full `pnpm verify` gate passed at `09:40Z`: 798 tests
+(576 web + 222 bot), build and guards. At this checkpoint runtime source was frozen at `5838c51`
+and immutable v19 was running in `/private/tmp/claude-paired-review-final-20260906-v19`; its verdict
+and adjudication are recorded in Revision 32.
+An immutable Chromium replay passed five scenarios / 19 behavior checks with 17 real HTTP 200
+responses and two deliberately injected transport failures. The failure → retry → held import
+journey preserved the same focused button, announced truthful progress, rejected a click while
+pending and committed/reloaded all original rows. Eventless SDK recovery took 802 ms; first SDK
+availability after 15 seconds recovered in 1,322 ms after the visibility edge. There were no runtime
+errors. Evidence: `/private/tmp/cometa-foreground-browser-5838c51-u5sKXL/report.json`; the progress
+screenshot was visually inspected. All probe processes closed. The separate nine signed-backend
+browser journeys also passed on `5838c51` at `09:42Z`, including exact-money transfer, shared-storage
+profile switching and offline recovery. Neither synthetic transport run is native Telegram acceptance.
+
+Both uploaded `de36540` packages (`20260906T092401Z` and `20260906T092402Z`) had verified checksums,
+identical extracted source and successful preflights, but neither was prepared or activated. They
+are now superseded and must never be activated. New `5838c51` packages `20260906T094101Z` /
+`20260906T094102Z` were built from a separate immutable source checkout, each rerunning all 798
+tests. Local and remote extracted trees compare identically; both uploaded checksums and strict
+host preflights passed at `09:46Z`. Neither has been prepared or activated yet.
+Production remains B `20260906T071101Z` / previous
+A `20260906T071100Z` on `5774b01`, with hardened host settings and `ledger_mode=local`; server
+activation/imports have not run. Earlier private parity hashes and browser results remain historical
+evidence, not acceptance of these corrections. Complete v19 and final browser checks before
+releasing this candidate; native owner-profile, server mutation, rollback-persistence,
+assistive-technology and Android/iOS acceptance remain pending.
+
+Revision 32 records the v19 verdict, adjudication and terminal-cold correction in runtime
+candidate `2897de5`. Reviewer session `23f0b096-f2d3-4d4f-899d-f2b70bf24022` used actual model
+`claude-opus-5`, requested `xhigh`, with verified effort `null` (unobservable), at a reported cost
+of USD `2.859691`. Artifacts are
+`/private/tmp/claude-paired-review-final-20260906-v19/{report,meta}.json`. The review returned two
+P3 findings, not a clean verdict; both have been adjudicated.
+
+- Finding 2 confirmed: if the first raw SDK fingerprint appeared during a deferred cold attempt
+  that then failed terminally, the first-availability path could launch another request. The fix
+  adds `(retryPending || idleRefreshAllowed)` to the first-SDK guard, reusing existing state without
+  new flags. The regression failed before the fix with two synchronization requests instead of
+  one. Forty-one focused tests passed. Removing the guard was a compiling mutant that failed the
+  specific terminal-cold regression with 26 tests passing; restored source passed all 27
+  coordinator tests and typecheck. Evidence:
+  `/private/tmp/cometa-terminal-cold-mutant-B8BF9e/report.json`.
+- Finding 1 rejected: the source contract requires a mounted recovery card and truthful copy while
+  a request is pending, not permanently unchanged messages. Progress reflects an actual request;
+  failure copy during a delayed retry is truthful, and the bounded 4.5-second gap deliberately
+  allows manual Retry. `CLAUDE.md` commit `c97b14e` makes this contract explicit. Adding a continuous
+  retry state would change the intended control model without a demonstrated defect.
+
+The actual Chrome probe `/private/tmp/cometa-recovery-geometry.PACwGH/run.mjs` passed: the same
+button remained focused, the live region stayed mounted, and before/after button rectangles were
+exactly equal (`x=144.40625`, `y=507.125`, `width=101.171875`, `height=44`). There was no remount or
+layout shift. Failure → Retry → held import preserved the canonical 437 rows through reload with
+zero runtime errors. The assertion that polite announcements must queue or lag is unsupported
+without native assistive-technology evidence; that remains a manual check, not grounds to add
+continuous state. This browser probe does not establish native screen-reader acceptance.
+
+The full `pnpm verify` gate passed at `09:55Z`: 799 tests (577 web + 222 bot). The final immutable
+`2897de5` browser replay passed all five scenarios / 19 behavior checks: 17 HTTP 200 responses,
+two intentional transport failures and zero runtime errors. Evidence:
+`/private/tmp/cometa-foreground-browser-2897de5-4ZzXID/report.json`.
+The separate nine signed-backend browser checks were replayed on `2897de5` at `10:05Z` and passed.
+At the same checkpoint both real owner snapshots still matched their private parity hashes with
+438 rows each; no raw identity or account data is included here. Production health was green at
+`10:08Z`, still in local mode.
+
+Immutable v20 stopped before reviewing the candidate because of a Claude session limit, with reset
+reported at 17:10 Bangkok. Evidence is
+`/private/tmp/claude-paired-review-final-20260906-v20/raw.json`. This produced no review verdict.
+The exact Opus 5 retry started at `10:10Z` and returned clean at `10:18Z`, with no findings.
+Session `b073946a-ed7c-4ee2-8ba9-fa2b4953db59` used actual model `claude-opus-5` on resolved source
+`2897de5c52d61f610e97d96f03d06bf6a34070e9`, requested `xhigh`, with verified effort `null`
+(unobservable), at a reported cost of USD `2.5545275`. Evidence is
+`/private/tmp/claude-paired-review-final-20260906-v20-retry/{report,meta}.json`. Residual policy/runtime
+questions were not findings and requested no new probes. The final review gate is closed. The v19
+terminal guard remains fixed and mutant-verified; its other UX finding retains the evidence-backed
+rejection above.
+
+Previous `5838c51` archives `20260906T094101Z` / `20260906T094102Z` were uploaded and passed
+preflights but were never prepared or activated. They are superseded and must never be activated.
+Fresh A `20260906T095601Z` and B `20260906T095602Z` are built from `2897de5`; extracted source
+comparison (`diff -qr`) and checksum checks passed. Their respective SHA-256 values are
+`d76e6c535e9e77192d66272011473fbcb221ef38ea2d0314847d0b71955dbe93` and
+`547025dc4bcf77a465bacb8a89aaf8b02025fb5e0eff18eaf4d6940c0c488175`.
+Both new archives were uploaded at `10:19Z`; remote checksums, source parity and strict preflights
+passed. Neither is activated at this checkpoint.
+
+The owner additionally authorized the main Telegram profile and web Telegram. The main
+`Telegram.app` opened the Nikita Cometa chat via keyboard navigation, but clicking English still
+returned the same Computer Use `-10005` error. Browser-plugin discovery returned no connected
+browser. The request to connect the browser through Settings / Computer Use or log into web
+Telegram is unanswered. These are current access blockers, not new application findings or native
+acceptance evidence; unrelated external actions remain outside this QA authorization.
+
+Production remains `5774b01`, current B `20260906T071101Z` / previous A `20260906T071100Z`, with
+`ledger_mode=local` and zero canonical imports at the last verified checkpoint. Normal deploy is
+starting after the clean review; completion is not yet claimed. Deploy verification,
+real owner-profile preservation/reopen and server activation gates remain open. Server
+mutation, rollback-persistence, native assistive-technology and Android/iOS acceptance are pending.
