@@ -1,18 +1,17 @@
 # Cometa — handoff
 
-Дата среза: 2026-09-06. Recovery pending: activation B `20260906T095602Z` не прошёл health gate;
-automatic rollback на A `20260906T095601Z` тоже оставил bot unhealthy из-за повторных неизменённых
-`setMyName` calls и Telegram `429`. Web остаётся healthy. Docker/Caddy perimeter установлен;
-`ledger_mode=local`, server switch и canonical imports не выполнялись. Recovery deploy ещё не сделан.
-Fix `8c0b647` добавляет profile read-before-write, `774f0ae` — guarded `prepare --repair-bot`.
-Final `pnpm verify` повторно прошёл 815 tests в `12:23Z`, но recovery review заблокировано:
-в `12:21Z` runner завершился с exit 1,
-Anthropic organization отключила Claude Code subscription access. Это не quota retry и не clean
-review. До recovery deploy нужен восстановленный доступ и accepted review либо явный emergency
-review-gate waiver владельца; не подменять модель и не повторять заблокированный запуск.
-Current — `20260906T095601Z`, previous — `20260906T071101Z`; web healthy, bot unhealthy.
-Recovery packages `20260906T104101Z`/`20260906T104102Z` из `774f0ae` готовы только локально:
-оба прошли 815 tests, source parity и checksums; не uploaded/prepared/activated.
+Дата среза: 2026-09-06. Recovery завершён: current B `20260906T104102Z`, previous A
+`20260906T104101Z`, оба source `774f0ae`. A activated в `12:31:30Z`, B — в `12:33:21Z`.
+Checksums/source parity, strict preflights и оба `prepare --repair-bot` прошли; обычные 31-second
+health/TLS/API gates стабильны. Web и bot healthy, zero restarts, `bot_polling_ready`, повторных
+profile `429` нет. Full status и ledger status exit 0: `/private/tmp/cometa-104102-live-status.log`.
+Mode остаётся LOCAL, owner canonical imports 0; mutating bank chat flows ещё не включены.
+Final `pnpm verify` повторно прошёл 815 tests, lint/deploy guards/build в `13:01Z`.
+Combined Opus review не выполнен: организация
+отключила Claude Code access. Владелец явно waived missing review только для emergency recovery
+source `774f0ae`; это закрывает только его deploy gate, не означает clean review или общий waiver.
+Предыдущие B `095602` activation и unhealthy rollback A `095601` из-за `setMyName 429` — история
+incident, устранённого profile read-before-write и guarded recovery.
 Candidate `2897de5` сохраняет предыдущие lifecycle/import исправления и закрывает terminal
 cold-session guard из v19 с red/green compiling mutant. Полный `pnpm verify` прошёл: 799 tests,
 577 web + 222 bot. Immutable real-browser pass прошёл 5 scenarios / 19 checks. Visual preference
@@ -36,22 +35,32 @@ candidate и повторный native pass после его deploy. Production
 
 ## Текущий результат
 
-На `https://euphoria.bot` web остаётся healthy после неудачного B activation и unhealthy rollback A.
-Bot recovery pending: его polling/readiness нельзя считать восстановленными. Пока `ledger_mode=local`,
+На `https://euphoria.bot` web и bot healthy после recovery B `104102`; polling/readiness проверены.
+Пока `ledger_mode=local`,
 web и Telegram bank state остаются device-local; разрешённый bot profile содержит только
 non-mutating commands. Existing
 owner snapshots сохранены: Nikita — все 438 rows без изменения; MetaFlexer — 437→438 только за счёт
 interest settlement. Это два проверяемых собственных Telegram Old профиля; их не следует
 отождествлять с John Cometa по одному display name.
 
-В `10:05Z` оба Telegram Old snapshots по 438 rows сохранили точные hashes. Native QA blocker
-остаётся: coordinate clicks по inline-кнопкам возвращают `-10005`, AX open Mini App работает.
-Owner отдельно разрешил основной Telegram и Web. В Telegram.app открыт чат Cometa профиля Nikita
-через Cmd+K/Return, но English coordinate click в `10:07Z` также завершился `-10005`.
-В `12:19Z` основной Telegram Cometa chat снова открыт клавиатурой; coordinate Open Cometa теперь
-возвращает `AXError.notImplemented`. Browser plugin не видит connected browsers. Просьбы подключить
-browser/войти в Web Telegram и вручную открыть Open Cometa пока без ответа. Это не завершённый
-callback-onboarding; John Cometa не идентифицирован.
+В `13:03:18Z` оба Telegram Old snapshots по 438 rows сохранили hashes и прежний compiled marker
+`071101`, imports 0. Desktop coordinate/AX ошибки остаются ограничением native automation.
+По явной просьбе владельца открыт отдельный headed Chrome с fresh profile
+`/private/tmp/cometa-telegram-web-qa.Mtuner/profile`; владелец вошёл через QR. Реальный Telegram Web
+John Cometa прошёл English → KZT → Cometa is ready → Open Cometa → Telegram open-page consent →
+embedded Mini App. Web namespace hash `b8c452f98d` отличается от Old Nikita `5a39b27c62` и MetaFlexer
+`a98ab714e4`: не отождествлять эти namespace по display name. В Web compiled
+`104102`, 437 rows, 4 accounts; reset/mutations не выполнялись. Browser plugin по-прежнему без
+bindings; Playwright использует только отдельный owner-authorized profile. Focused John Web QA
+пройден, включая foreground/reopen; Old final-build, phone и server-mode gates остаются открытыми.
+В `12:58Z` John Web: поиск ChatGPT дал 9 результатов, включая original Pending; Received filter —
+0. RU→English и primary KZT→USD→KZT пройдены; currency меняла только total display. Точные hashes
+437 transactions и accounts не изменились, marker `104102`. KZT transfer `700000` заблокирован
+disabled Transfer с нехваткой `84040.43`; submit не выполнялся. Draft `123 KZT` сохранился после
+переключения на отдельную about:blank tab и обратно; native MainButton `Transfer ₸123.00` enabled,
+native Back закрыл sheet. Mini App закрыта, `/help` вернул четыре LOCAL commands, новая кнопка
+Open Cometa снова открыла приложение. Финальный `bank-proof` в `13:03:48Z`: те же hashes,
+437 rows/4 accounts, English, primary KZT, compiled `104102`, LOCAL. Submit/mutations не выполнялись.
 
 Deployed bridge поднимает persistence до schema 5 и добавляет восемь deterministic fixtures:
 `KZT`, `THB`, `VND`, `RUB`, `USD`, `EUR`, `IDR`, `GEL`. Fresh fixture всегда начинает с четырёх
@@ -201,8 +210,8 @@ Bot активирован на Irena. По явному решению влад
 `@MyBankApp_Bot`, сохранил token как regular file с owner `10001:10001` и mode `0600`, затем локальный
 clipboard был очищен. Значение не попало в argv, repo, docs, memory или command output. Это осознанный
 security debt: перед любым нетестовым или публичным использованием token всё равно нужно revoke/rotate.
-Ранний healthy startup закончил profile setup и polling. После deploy `095602` и rollback `095601`
-это исторический checkpoint: повторный `setMyName 429` блокирует readiness, recovery ещё не deployed.
+После исторического `setMyName 429` incident recovery `104101`/`104102` восстановил profile setup
+и polling: `bot_polling_ready`, zero restarts, повторных profile `429` нет.
 
 `install-secret.sh` проверяет candidate через `getMe` именно для `@MyBankApp_Bot`, не кладёт token
 в argv/logs и атомарно меняет live file. Standalone activation использует release-labelled images,
@@ -230,7 +239,7 @@ acceptance gate.
 
 Production migration target — выделенный VPS Irena (`ssh irena`, `187.53.132.226`), runtime root
 `/srv/cometa-bank`. Hostname, key-only SSH, non-root `irena` с passwordless sudo (live source:
-`ssh -G irena`), Docker Engine +
+`ssh -G irena`, актуальный user `irena`, uid/gid `1001`, не прежний `metaflexer`), Docker Engine +
 Compose, UFW `22/80/443` и unattended upgrades настроены. Login user намеренно не включён в
 root-equivalent группу `docker`.
 
@@ -378,21 +387,32 @@ Telegram Android/iOS acceptance.
   815 tests green; в `12:21Z` combined Opus runner завершился exit 1: organization disabled Claude
   Code subscription access. Actual model — `claude-opus-5`, accepted report отсутствует.
   Evidence: `/private/tmp/claude-paired-review-recovery-20260906/{raw.json,stderr.log}`.
-  Recovery deploy требует восстановления Anthropic access и review либо явного owner emergency
-  waiver. Не считать clean v20 на `2897de5` review этих fixes и не делать fallback/repeat.
-- Recovery pair `20260906T104101Z`/`20260906T104102Z` для `774f0ae` locally ready: каждый package
-  прошёл 815 tests, source identical/checksums PASS; не uploaded/prepared/activated. Evidence:
+  Владелец затем явно waived missing review только для emergency recovery `774f0ae`; deploy gate
+  закрыт этим узким exception, не clean review. Не считать v20 на `2897de5` review этих fixes.
+- Recovery pair `20260906T104101Z`/`20260906T104102Z` для `774f0ae` deployed: каждый package
+  прошёл 815 tests, source identical/checksums и strict preflight PASS; оба `prepare --repair-bot`
+  успешны. A activated `12:31:30Z`, B `12:33:21Z`; current B, previous A. Evidence:
   `/private/tmp/cometa-774f0ae-package-proof.GJ1xzO/source-diff.log`. CI `774f0ae` green в `12:16:08Z`,
   run `34032518573`.
-- В `12:15:14Z` authority LOCAL, imports 0; оба snapshots по 438 rows сохранили hashes и compiled
-  marker `071101`. Current `095601`, previous `071101`, web healthy/bot unhealthy.
+- Full status/ledger status exit 0: `/private/tmp/cometa-104102-live-status.log`; 31-second
+  health/TLS/API stable, zero restarts, `bot_polling_ready`, no repeated profile `429`.
+  Root-only same-VPS WAL-safe backups: `20260906T122958Z-before-20260906T104101Z.sqlite` и
+  `20260906T123205Z-before-20260906T104102Z.sqlite` в `/srv/cometa-bank/backups`.
+- В `13:03:18Z` authority LOCAL, imports 0; оба Old snapshots по 438 rows сохранили hashes и
+  compiled marker `071101`. Web John Cometa отдельно загрузил `104102`, 437 rows, 4 accounts.
 - В `10:05Z` повторены 9 signed checks, PASS, и подтверждены прежние точные hashes двух native
   438-row snapshots. В `10:08Z` live health повторно healthy, authority LOCAL, canonical imports 0.
 - Native inline coordinate clicks в Old и основном Telegram.app блокируются `-10005`; основной
   Cometa chat Nikita открыт через Cmd+K/Return, English click повторил ошибку в `10:07Z`.
-  Owner разрешил основной Telegram/Web. Browser plugin видит ноль connected browsers; ответ на
-  просьбу Settings → Computer use / Web Telegram login ещё не получен. В `12:19Z` keyboard chat open
-  сработал, coordinate Open Cometa вернул `AXError.notImplemented`; просьба manual open без ответа.
+  В `12:19Z` keyboard chat open сработал, coordinate Open Cometa вернул `AXError.notImplemented`.
+  Затем owner QR-login в отдельном headed Chrome позволил реальный Web John Cometa onboarding
+  English→KZT→ready→Open Cometa→consent→embedded Mini App без reset/mutation. Browser plugin
+  остаётся без bindings. В `12:58Z` также прошли ChatGPT search (9, original Pending), Received
+  filter (0), RU→English и KZT→USD→KZT display-only; 437 transaction/account hashes неизменны.
+  Transfer `700000 KZT` blocked, shortfall `84040.43`, no submit. Foreground draft `123 KZT`
+  сохранился при tab switch/back; native MainButton enabled, native Back закрыл sheet.
+  Close → `/help` (четыре LOCAL commands) → новая Open Cometa → reopen прошёл. Proof `13:03:48Z`
+  сохранил 437 rows/4 accounts и exact hashes, English/KZT/compiled104102/LOCAL. John Web gate закрыт.
 - Два showcase visuals опубликованы в `51a2eb0`: реальные web screenshots и явно помеченный illustrative
   Telegram preview с точным copy реального bot engine. Это не native Telegram capture и не
   acceptance evidence. Источники: `docs/assets/showcase/README.md`. Linux CI для `de5395a` green,
@@ -616,29 +636,16 @@ Telegram Android/iOS acceptance.
 
 ## Открытые gates
 
-1. Immediate blocker: Anthropic organization отключила Claude Code access; combined recovery review
-   завершилось exit 1 без accepted report в `12:21Z`. Нужен восстановленный доступ и review либо
-   явный emergency review-gate waiver владельца. Не делать model fallback или повторные запуски.
-   Clean v20 для `2897de5` и его browser checks остаются scoped evidence, не review новых fixes.
-   Владелец попросил закончить затянувшуюся задачу: не открывать дополнительные improvement cycles.
-2. Только после закрытия review blocker восстановить bot через guarded `prepare --repair-bot`,
-   используя locally ready `774f0ae` pair `104101`/`104102` (815 tests каждый, source/checksums PASS).
-   Они ещё не uploaded/prepared/activated. Продолжить hardened lifecycle:
-   strict preflight обоих, prepare обоих, activate A затем B при `ledger_mode=local`. Оба rollback
-   slots должны содержать final fix; не использовать superseded `075300`/`075301` и загруженные
-   `092401`/`092402` и `094101`/`094102`. Final pair `095601`/`095602` для `2897de5` uploaded в `10:19Z`:
-   local/remote checksums, source parity и preflights PASS, но B activation и automatic rollback A
-   оставили bot unhealthy с `setMyName 429`. Recovery deploy ещё не выполнен; web healthy и mode LOCAL.
-   Docker perimeter
-   и Caddy migration уже выполнены; повторный host-wide migration не является следующим шагом.
-   Перепроверить health,
-   TLS/API, compiled marker нового build, foreground/reopen и сохранность snapshots в Nikita и
-   MetaFlexer. Owner явно разрешил deploy и QA этих собственных профилей; не запрашивать blanket
-   action-time approval для каждого mock-bot шага. Unrelated external actions этим не разрешены.
-   Native inline clicks в Old/основном Telegram блокируются; последний Open Cometa в `12:19Z`
-   вернул `AXError.notImplemented`, manual-open request без ответа.
-   Browser plugin пока без connected browser; дождаться ответа на просьбу подключить его через
-   Settings → Computer use / войти в Web Telegram и завершить реальные callback flows.
+1. Recovery deploy завершён и не требует повторения. Узкий owner waiver покрывает только missing
+   Opus review emergency source `774f0ae`; organization access всё ещё отключён, clean не заявлен.
+   Не переносить waiver на будущие changes и не открывать дополнительный improvement/review cycle.
+2. Focused John Web QA завершён: реальный onboarding, foreground draft/native controls, `/help`
+   и повторный launch пройдены с неизменными ledger/account hashes. Отдельно повторить
+   final-build release-marker/preservation и native controls checks Old Nikita и
+   MetaFlexer: их 438-row snapshots пока имеют прежний marker `071101`. Не считать John одним из
+   этих профилей. Owner разрешил эти QA действия; unrelated external actions не разрешены.
+   Native desktop automation ограничена `-10005`/`AXError.notImplemented`; browser-plugin binding
+   отсутствует, но owner-authorized isolated Playwright Web session уже работает.
 3. Только после исправления и real-profile retest выполнить one-way `ledger-mode server --apply`,
    импортировать по одному canonical snapshot на профиль и пройти изолированные RU/EN journeys:
    manual income/expense, recurrence с backfill/no-overdraft, add/adjust/close/restore и

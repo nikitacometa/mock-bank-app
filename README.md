@@ -74,9 +74,9 @@ pnpm verify
 
 ## Release status
 
-The web demo is live. Bot recovery is pending after Telegram rate-limited repeated profile setup
-during deployment. The repair passes 815 automated tests and Linux CI; its independent review was
-interrupted by provider access restrictions. Existing demo histories remain intact.
+The web demo and bot are live. Real Telegram Web onboarding and embedded Mini App launch pass
+on the current release. The recovery build passes 815 automated tests and Linux CI; existing
+demo histories remain intact.
 
 The expanded Telegram ledger remains a release candidate. Signed real-backend, foreground-recovery
 and first-import browser scenarios pass, but server activation and real two-profile Telegram

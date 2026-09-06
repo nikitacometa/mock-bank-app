@@ -1,17 +1,18 @@
 # Cometa — resume point and next phase
 
-Date: 2026-09-06. Recovery is pending: B `20260906T095602Z` activation failed its health gate and
-automatic rollback to A `20260906T095601Z` also left the bot unhealthy after repeated unchanged
-`setMyName` calls received Telegram `429`. Web remains healthy; Docker/Caddy hardening is installed.
-Ledger mode is `local`, with zero canonical imports. Recovery fixes `8c0b647` (profile read-before-write)
-and `774f0ae` (guarded `prepare --repair-bot`) passed 815 tests; final `pnpm verify` passed again
-at `12:23Z`. At `12:21Z` the combined Opus runner
-exited 1 because the organization disabled Claude Code subscription access. No accepted review
-exists: restore Anthropic access and complete review, or obtain an explicit owner emergency
-review-gate waiver before recovery deploy. This is not a quota retry; do not fallback or repeat.
-Current is `20260906T095601Z`, previous `20260906T071101Z`; web healthy, bot unhealthy. Recovery
-packages `20260906T104101Z`/`20260906T104102Z` from `774f0ae` are locally ready, each with 815 tests
-and matching source/checksums, but not uploaded/prepared/activated. Earlier candidate `2897de5` retains
+Date: 2026-09-06. Recovery is complete: current B `20260906T104102Z`, previous A
+`20260906T104101Z`, both source `774f0ae`. A activated at `12:31:30Z`, B at `12:33:21Z`; both
+strict preflights and `prepare --repair-bot` passed with matching source/checksums. Ordinary
+31-second health/TLS/API gates passed: web/bot healthy, zero restarts, `bot_polling_ready`, no
+repeated profile `429`. Full and ledger status exited 0; evidence:
+`/private/tmp/cometa-104102-live-status.log`. Mode remains LOCAL with zero owner canonical imports;
+expanded bank chat flows are not active. Final `pnpm verify` passed again at `13:01Z`: 815 tests,
+lint/deploy guards/build.
+Combined Opus review produced no accepted report because the organization disabled Claude Code
+access. The owner explicitly waived missing review only for emergency recovery source `774f0ae`.
+That narrow exception closes its deploy gate, not a clean review or a future-change waiver.
+The earlier failed B `095602` activation and unhealthy rollback A `095601` are incident history.
+Earlier candidate `2897de5` retains
 the prior lifecycle/import fixes and fixes v19's terminal cold-session guard with a red/green
 compiling mutant. Full `pnpm verify` passed: 799 tests (577 web + 222 bot). Immutable browser
 verification passed 5 scenarios / 19 checks; report: `/private/tmp/cometa-foreground-browser-2897de5-4ZzXID/report.json`.
@@ -24,8 +25,17 @@ The 9 signed checks passed again at `10:05Z`; live health and LOCAL/zero imports
 at `10:08Z`. Final packages `20260906T095601Z`/`20260906T095602Z` were uploaded at `10:19Z`;
 local/remote checksums, extracted source parity and strict preflights passed before the failed B
 activation and unhealthy rollback A. Public visuals are in `51a2eb0`; latest Linux CI for `774f0ae`
-passed at `12:16:08Z`, run `34032518573`. At `12:15:14Z`, both 438-row snapshots retained their hashes
-and compiled `071101` marker; authority remained LOCAL with zero imports. None proves bot recovery.
+passed at `12:16:08Z`, run `34032518573`. At `13:03:18Z`, both Old 438-row snapshots retained hashes
+and marker `071101`, with zero imports. Real Telegram Web John Cometa independently completed
+English→KZT→ready→Open Cometa→Telegram consent→embedded Mini App on compiled `104102`, with
+437 rows/four accounts and no reset or mutation. At `12:58Z` ChatGPT search returned nine results
+including original Pending, Received filter returned zero, RU→English and primary KZT→USD→KZT
+passed with display-only currency changes. Exact transaction/account hashes stayed unchanged;
+`700000 KZT` transfer was blocked with shortfall `84040.43`, no submit. Foreground/reopen passed:
+draft `123 KZT` survived tab switch/back, dynamic native MainButton was enabled, native Back closed
+the sheet, and close → `/help` (four LOCAL commands) → new Open Cometa button reopened the app.
+Final proof at `13:03:48Z` retained identical hashes, 437 rows/four accounts, English/KZT/compiled
+104102/LOCAL. Distinct John Web QA is complete; Old final-build, phone and server-mode gates remain.
 The milestone is not accepted.
 
 The deployed source passed 763 tests, 10 local web-browser checks, 9 synthetic signed real-backend
@@ -45,27 +55,30 @@ in `docs/handoff.md`; architecture remains canonical in `docs/spec.md`.
   mock ledger per verified Telegram ID, shared by the bot and Mini App through typed commands.
 - The product remains fictional. It has no real money, payment rails, bank connection, KYC or AML.
 - Production origin is Irena. Hostinger remains the external TLS rollback origin; Julia is unrelated
-  to Cometa.
+  to Cometa. `ssh -G irena` currently resolves user `irena`, uid/gid `1001`; use that live alias,
+  not the old `metaflexer` login.
 - Caddy is the only public listener/TLS owner on Irena. Docker web is loopback-only on `8080/8443`;
   the retained `8443` Nginx TLS hop is temporary bridge compatibility. Legacy Certbot units stay
-  disabled/inactive. The release pair is source-clean but bot health recovery is pending; old patched C/D releases
+  disabled/inactive. Recovery A104101/B104102 is source-clean and healthy; old patched C/D releases
   are historical migration evidence, not active rollback slots. The new data-persistence rollback
   rehearsal remains pending.
 - Production uses the exact versioned Docker daemon policy and Caddy's caddy-owned Unix admin
   socket, mode `0200`, with `persist_config off` and `h1/h2`. Trusted inner TLS and real-IP gates,
-  key-only SSH, UFW `22/80/443`, `jq 1.8.1` and TLS/API gates were verified. Earlier stable bot health
-  is historical; the latest bot startup/rollback incident is recorded above.
+  key-only SSH, UFW `22/80/443`, `jq 1.8.1` and TLS/API gates were verified. Recovery's ordinary
+  31-second health/TLS/API gates passed; polling is ready without restarts or repeated profile 429.
+  Root-only same-VPS WAL-safe backups are `20260906T122958Z-before-20260906T104101Z.sqlite` and
+  `20260906T123205Z-before-20260906T104102Z.sqlite` under `/srv/cometa-bank/backups`.
 - Both real Telegram Old profiles, Nikita and MetaFlexer, persisted compiled marker B. Nikita's
   438 existing rows were preserved exactly; MetaFlexer's 437 became 438 only through interest.
   Do not reset these snapshots or identify either profile as John Cometa from a display name.
-- Current native QA limitation: inline coordinate clicks return `-10005` in Telegram Old and the
-  separately owner-authorized main Telegram.app. Nikita's Cometa chat opened through Cmd+K/Return,
-  but the English click failed again at `10:07Z`. At `12:19Z` keyboard chat open worked, while
-  coordinate Open Cometa returned `AXError.notImplemented`; the manual-open request is unanswered.
-  Both Old profiles retained exact 438-row hashes and marker `071101` at `12:15:14Z`.
-  The Browser plugin lists no connected browsers;
-  the request to connect one via Settings → Computer use and log in to Web Telegram is unanswered.
-  Callback onboarding remains unverified; main Telegram and Web are explicitly authorized.
+- Native desktop automation still hits `-10005`/`AXError.notImplemented`; the Browser plugin has no
+  bindings. At the owner's explicit request, headed Chrome uses a fresh isolated profile at
+  `/private/tmp/cometa-telegram-web-qa.Mtuner/profile`, QR-authenticated by the owner. Real Web
+  onboarding completed in John Cometa. Its namespace hash `b8c452f98d` is distinct from Old Nikita
+  `5a39b27c62` and MetaFlexer `a98ab714e4`; do not conflate the three profiles. John has compiled
+  `104102`, 437 rows/four accounts, no resets/mutations; both Old 438-row hashes and marker `071101`
+  were unchanged at `13:03:18Z`. Distinct John Web foreground/reopen and native-control QA passed;
+  Old final-build and phone gates remain open.
 - Two showcase compositions are published in `51a2eb0`: actual web screenshots and an explicitly illustrative
   Telegram preview using exact bot-engine copy, not native captures. Their provenance is in
   `docs/assets/showcase/README.md`; neither replaces real-profile acceptance.
@@ -140,41 +153,26 @@ in `docs/handoff.md`; architecture remains canonical in `docs/spec.md`.
 ## Resume order
 
 1. Read `CLAUDE.md`, `docs/handoff.md`, this file and `deploy/standalone/README.md`.
-2. Inspect `git status` and preserve unrelated changes. The immediate blocker is the organization-
-   disabled Claude Code access: combined recovery review exited 1 at `12:21Z`, without an accepted
-   report. Restore access and complete review, or obtain an explicit owner emergency review-gate
-   waiver. Do not switch models or repeat the blocked runner. The clean v20 review and browser passes
-   for `2897de5` remain scoped evidence, not review of the later fixes. The owner asked to finish
-   the overlong task; do not start unrelated improvement or audit cycles.
+2. Inspect `git status` and preserve unrelated changes. Recovery `774f0ae` is deployed under the
+   explicit owner emergency waiver for its missing Opus review only. Organization access remains
+   disabled; this is not clean review or permission to skip future reviews. Do not start another
+   improvement/review cycle or repeat recovery. Continue the bounded acceptance already in progress.
 3. Recheck Irena, current/previous images, containers/restarts, `ledger_mode=local`, Caddy semantics,
    exact loopback bindings, quiesced renewal units, DNS and TLS/API smoke. The Docker/Caddy bridge
    is already installed; do not rerun its host-wide migration as the next normal release step.
-4. Only after resolving the review blocker, recover the bot using guarded `prepare --repair-bot`.
-   Keep authority
-   local and preserve the live DB/token; do not repeat unchanged profile writes or the host migration.
-   Recovery `774f0ae` packages `20260906T104101Z`/`20260906T104102Z` are already locally ready, each
-   with 815 tests and identical source/checksums. They are not uploaded/prepared/activated. Evidence:
-   `/private/tmp/cometa-774f0ae-package-proof.GJ1xzO/source-diff.log`. Upload and strict-preflight both,
-   prepare both, then activate A and B through the
-   normal hardened lifecycle while ledger mode stays `local`. Both rollback slots must contain the
-   final fix before first server activation. Superseded prepared `20260906T075300Z`/`20260906T075301Z`
-   from `aab2dc0` must not be used or overwritten. Uploaded `20260906T092401Z`/`20260906T092402Z`
-   from `de36540` and local `20260906T094101Z`/`20260906T094102Z` from `5838c51` are also superseded:
-   never prepare or activate them. The final `2897de5` pair is `20260906T095601Z`/`20260906T095602Z`;
-   both were uploaded at `10:19Z`, local/remote checksums and extracted source parity pass.
-   Strict preflights passed, but B activation and automatic rollback A left the bot unhealthy with
-   repeated unchanged `setMyName 429`. Recovery deployment is not yet complete.
-   Each new activation creates its normal root-only
-   SQLite backup and passes immutable-image, health and inner/outer TLS/API gates.
+4. Keep the recovered A104101/B104102 rollback pair on `774f0ae`; do not rerun prepare/activate or
+   the host migration. Both ordinary health/TLS/API gates and root-only WAL-safe backups are done.
+   Older `075300`/`075301`, `092401`/`092402`, `094101`/`094102` and incident `095601`/`095602`
+   are not the active rollback pair. Preserve the DB/token and LOCAL mode during remaining QA.
 5. Repeat real Telegram Old foreground/reopen, native-control and snapshot-preservation checks in
    Nikita and MetaFlexer. Verify the new compiled marker in both profiles and keep the existing
    438-row snapshots intact except for legitimate time-derived settlement. The owner authorized
    deploy and QA of these own profiles, including mock-bot messages and callbacks; unrelated
    external actions are not covered by that authorization.
-   Coordinate inline clicks fail in Old and main Telegram; latest Open Cometa returned
-   `AXError.notImplemented` at `12:19Z`. Await the
-   owner's response to connect a browser through Settings → Computer use / Web Telegram login,
-   then finish the real callbacks. Main Telegram and Web are explicitly authorized.
+   Desktop automation is limited, but the owner-authenticated isolated Web profile is now available.
+   Focused Web QA for distinct John Cometa is complete, including foreground/native controls and
+   fresh `/help` launch with exact bank-state preservation. Do not substitute that distinct namespace
+   for Old's final-build release-marker/preservation retests.
 6. Only after the fix and real-profile retest, apply the one-way server-mode switch and import each
    preserved device snapshot once. Prove one-off, recurrence/backfill, overdraft rejection,
    add/adjust/close/restore, current→previous→current survival and cross-profile isolation. Use RU/EN

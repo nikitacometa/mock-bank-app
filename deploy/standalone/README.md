@@ -21,37 +21,55 @@ certificate and renewal.
 
 ## Verified checkpoint — 2026-09-06
 
-**Recovery blocker, checked at 12:21Z:** current is `20260906T095601Z`, previous is
-`20260906T071101Z`. Web is healthy; the bot is unhealthy after B `20260906T095602Z`
-activation and its automatic rollback both hit repeated unchanged `setMyName` writes
-with Telegram `429`. Do not retry those images as a fix. The public web returns 200
-with valid TLS; unauthenticated bootstrap returns 401.
+**Recovery completed:** current is B `20260906T104102Z`, previous is A
+`20260906T104101Z`, both from source `774f0ae`. A activated at `12:31:30Z`, B at
+`12:33:21Z`. Each passed the ordinary 31-second stable-health window, immutable
+image/perimeter checks and inner/outer TLS/API smoke. Both services are healthy,
+with zero container restarts and `bot_polling_ready`; repeated profile-setup `429`
+no longer blocks startup. Full status and ledger-mode status exited 0 after B:
+`/private/tmp/cometa-104102-live-status.log`.
 
-Repair source `774f0ae` includes profile read-before-write (`8c0b647`) and the guarded
-preparation-only flag described below. Both new local packages, `20260906T104101Z`
-and `20260906T104102Z`, pass all 815 tests (577 web + 238 bot), checksum checks and
-extracted source parity. Linux CI passed in run `34032518573` at `12:16:08Z`.
-Neither repair release has been uploaded, prepared or activated.
+Both packages passed 815 tests (577 web + 238 bot), local/remote checksum checks,
+extracted source parity, strict preflight and guarded `prepare --repair-bot`.
+Linux CI for `774f0ae` passed in run `34032518573` at `12:16:08Z`.
+Root-only WAL-safe backups were created before A at `12:29:58Z` and before B at
+`12:32:05Z`; both were verified through both bot images. They remain on the same VPS.
 
-The independent Opus review exited without an accepted report because Anthropic
-disabled the organization's Claude Code subscription access. Evidence:
-`/private/tmp/claude-paired-review-recovery-20260906/raw.json`. Restore provider access
-or obtain an explicit owner emergency exception to the independent-review gate
-before recovery deployment. Do not substitute a model or describe this as a clean review.
+The owner explicitly authorized this narrow emergency recovery without the
+unavailable independent Opus review. That review remains **blocked, not clean**:
+Anthropic disabled the organization's Claude Code subscription access, and the
+runner exited without an accepted report. Evidence:
+`/private/tmp/claude-paired-review-recovery-20260906/raw.json`. The exception covers
+only the `774f0ae` recovery deployment, not later changes or authority activation.
 
-Once that gate is resolved, upload and strict-preflight both new packages, run
-`prepare --repair-bot` on both, then ordinary A/B activation. Keep ledger mode local.
-Read-only parity at `12:15:14Z` confirms both existing profiles retain their exact
-438-row histories and balances, compiled marker `071101`, and zero canonical imports.
-Native acceptance remains open: the main Telegram chat opens by keyboard, but its
-Open Cometa button returned `AXError.notImplemented`. The owner was asked to open it
-manually; the Browser plugin has no connected browser.
+Ledger mode remains `local`. Read-only parity at `12:33:41Z` confirms both existing
+profiles retain their exact 438-row histories and balances, compiled marker `071101`,
+and zero canonical imports. Do not reset or replace them with a fresh browser fixture.
+
+The owner logged into an explicitly requested, separate headed Chrome profile.
+Real Telegram Web passed English → KZT → ready card → Open Cometa → embedded
+Mini App on compiled release `104102`, with four accounts and 437 fresh rows.
+Its John Cometa namespace is distinct from both previously checked Old profiles;
+this does not satisfy their final-build preservation gate. Private QA artifacts:
+`/private/tmp/cometa-telegram-web-qa.Mtuner/`. Never publish or export its login profile.
+Focused Web QA also passed merchant search/Pending, income filtering, RU/EN,
+display-only KZT → USD → KZT, overdraft prevention, draft-preserving foreground,
+native Back/Main controls, `/help` and close/reopen from the new bot reply.
+At `13:03:48Z`, all 437 transaction and four-account hashes still matched the
+pre-test baseline; English/KZT and compiled `104102` were retained. No transfer
+was submitted. The two Old 438-row snapshots remained unchanged at `13:03:18Z`,
+with compiled `071101` and no canonical imports.
+The Browser plugin still has no binding; this authorized Playwright instance is
+independent of the owner's existing browser and Telegram installations.
+
+Live SSH configuration now resolves `irena` to user `irena` (UID/GID `1001`).
+Use `ssh -G irena` as the source of truth, not historical `metaflexer` examples.
 
 The earlier checkpoints below are historical, not current health or release claims.
 
 ### Earlier release evidence
 
-Source `5774b01` is deployed as current B `20260906T071101Z`, with previous
+Source `5774b01` was deployed as current B `20260906T071101Z`, with previous
 A `20260906T071100Z`. Both releases are authority-capable. The persisted ledger
 mode is still `local`; server activation and canonical imports have not run.
 
@@ -91,8 +109,8 @@ Actual model is `claude-opus-5`; requested effort xhigh, verified effort unobser
 Nine signed checks passed again at `10:05Z`; live health and LOCAL/zero imports
 were reconfirmed at `10:08Z`.
 
-This is not final Telegram acceptance. The next release uses the already-hardened
-normal lifecycle with TWO new identical-source releases; do not repeat the one-time
+This was not final Telegram acceptance. Subsequent releases use the already-hardened
+normal lifecycle with two new identical-source releases; do not repeat the one-time
 Docker/Caddy migration. Do not activate or overwrite superseded prepared releases
 `20260906T075300Z`/`20260906T075301Z` from `aab2dc0`. Uploaded
 `20260906T092401Z`/`20260906T092402Z` from `de36540` are also superseded: do not
@@ -104,8 +122,8 @@ extracted source trees are identical by `diff -qr`. A package SHA-256:
 B package SHA-256:
 `547025dc4bcf77a465bacb8a89aaf8b02025fb5e0eff18eaf4d6940c0c488175`.
 Strict preflights passed; A activated, but B activation and automatic rollback A
-left the bot unhealthy. Use the new reviewed recovery source, not another activation
-of this pair. Keep authority local until both
+left the bot unhealthy. The owner-approved `774f0ae` recovery pair supersedes this
+incident; do not reactivate its failed images as a fix. Keep authority local until both
 rollback slots contain the final fix and both native profiles pass new compiled
 markers, foreground/reopen and snapshot preservation.
 The new current→previous→current data-persistence rehearsal and Android/iOS acceptance
@@ -115,9 +133,9 @@ Native inline coordinate clicks return `-10005` in Telegram Old and the separate
 owner-authorized main Telegram.app. Nikita's Cometa chat opened via Cmd+K/Return,
 but the English click failed again at `10:07Z`. AX open Mini App works; both Old
 profiles retained their exact 438-row snapshot hashes at `10:05Z`. The Browser
-plugin lists no connected browsers. The request to connect one through Settings →
-Computer use and log in to Web Telegram is unanswered. Main Telegram and Web are
-explicitly authorized; John Cometa has not been identified.
+plugin lists no connected browsers. The later separate-browser login and real
+John Cometa Web evidence supersede this earlier UI-access blocker, but do not
+establish preservation for the two existing Old profile namespaces.
 
 ## Runtime layout
 
@@ -456,14 +474,13 @@ mutate the public edge or certificate owner.
 
 ## Enable server ledger authority
 
-Only enable authority after two NEW identical-source releases carrying the final
-reviewed fix are current and previous, and both real Telegram profiles have
-persisted the final compiled client marker. The earlier bridge markers do not
-cover candidate `2897de5`. The 799-test gate and immutable browser pass are green;
-v19's terminal guard is fixed and its visual preference rejected with evidence.
-The exact Opus 5 retry after v20's quota failure passed clean at `10:18Z`.
-Post-deploy native foreground/reopen and snapshot preservation remain required
-before the first applying command below.
+The identical-source final recovery pair is now current and previous. Before
+authority activation, both existing real Telegram profiles must still persist
+the final compiled client marker and pass foreground/reopen with snapshot
+preservation. Their earlier `071101` markers do not cover the deployed fix;
+the separate John Cometa Web profile does not substitute for them. The recovery
+passed 815 tests and Linux CI. Its emergency review exception does not waive
+these data-preservation gates or prove two-profile server-ledger acceptance.
 
 ```bash
 sudo /srv/cometa-bank/current/deploy/standalone/scripts/release.sh ledger-mode status
