@@ -238,6 +238,20 @@ foreground/reopen and snapshot-preservation checks in both real profiles before
 the first one-way server activation. No Docker/Caddy migration or token replacement
 is part of this normal release cycle.
 
+### Prepare a bot startup repair
+
+If the current bot is running with its immutable image but is unhealthy or has
+restarted, use the new repair release's `release.sh prepare --repair-bot`.
+This explicit preparation-only flag waives only current bot health and restart
+count. The existing current release, singular running bot, immutable image
+manifest, healthy web, Docker/Caddy perimeter, trusted inner/outer TLS and every
+unauthenticated API rejection remain mandatory. An absent bot, unknown image or
+broken API boundary still blocks preparation.
+
+Preparation builds and checks candidate images without recreating live services.
+Then use ordinary `activate`; its backup, health stability, zero-restart and
+TLS/API gates are unchanged. The repair flag is rejected for all other actions.
+
 ## Install the Docker daemon perimeter
 
 Run this one-time installer from extracted bridge A before `harden-edge`. The

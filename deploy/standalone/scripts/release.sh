@@ -75,6 +75,7 @@ without_email=false
 server_ipv4=''
 server_ipv6=''
 apply_rollback=false
+repair_bot=false
 ledger_mode_command=''
 compat_copy=''
 scratch_directory=''
@@ -103,7 +104,7 @@ log() {
 
 usage() {
   printf '%s\n' \
-    'Usage: release.sh prepare' \
+    'Usage: release.sh prepare [--repair-bot]' \
     '       release.sh harden-edge [--apply]' \
     '       release.sh install-token' \
     '       release.sh activate' \
@@ -140,6 +141,10 @@ while (( $# > 0 )); do
       apply_rollback=true
       shift
       ;;
+    --repair-bot)
+      repair_bot=true
+      shift
+      ;;
     status|server)
       [[ "${action}" == 'ledger-mode' && -z "${ledger_mode_command}" ]] || \
         fail "unexpected positional argument: $1"
@@ -159,6 +164,8 @@ if [[ "${action}" == '--help' || "${action}" == '-h' || -z "${action}" ]]; then
   [[ -n "${action}" ]] && exit 0
   exit 1
 fi
+[[ "${repair_bot}" != true || "${action}" == 'prepare' ]] || \
+  fail '--repair-bot is only valid for prepare'
 
 [[ "${deploy_root}" == /* && "${deploy_root}" != '/' && "${deploy_root}" != *'..'* ]] || \
   fail 'COMETA_DEPLOY_ROOT must be a narrow absolute path without ..'
@@ -3177,14 +3184,27 @@ harden_edge() {
 }
 
 prepare_release() {
-  local current_release manifest
+  local current_release manifest current_bot current_bot_image expected_bot_image
   current_release="$(read_release_link current)"
   [[ -n "${current_release}" ]] || \
     fail 'staged Caddy compatibility release requires an existing current release'
   assert_staged_edge_contract
   verify_release_compose_edge_contract "${release_id}"
   verify_release_compose_edge_contract "${current_release}"
-  service_health "${current_release}" bot || fail 'current bot service is not healthy'
+  if [[ "${repair_bot}" == true ]]; then
+    verify_release_images "${current_release}"
+    current_bot="$(running_compose_service_container_id bot)" || \
+      fail 'bot repair requires exactly one running current bot'
+    current_bot_image="$(docker inspect --format '{{.Image}}' "${current_bot}")" || \
+      fail 'could not inspect current bot image for repair'
+    expected_bot_image="$(docker image inspect --format '{{.Id}}' "cometa-bank-bot:${current_release}")" || \
+      fail 'could not inspect immutable current bot image for repair'
+    [[ "${current_bot_image}" == "${expected_bot_image}" ]] || \
+      fail 'bot repair requires the immutable current bot image'
+    log 'preparing bot repair; only current bot health and restart count are waived'
+  else
+    service_health "${current_release}" bot || fail 'current bot service is not healthy'
+  fi
   service_health "${current_release}" web || fail 'current web service is not healthy'
   inner_upstream_https_smoke "${current_release}" || \
     fail 'current inner upstream HTTPS smoke test failed'

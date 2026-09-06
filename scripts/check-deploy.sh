@@ -3144,6 +3144,99 @@ for staged_candidate_function in prepare_release activate_release; do
     <<<"${staged_candidate_body}" || \
     fail "${staged_candidate_function} must validate the candidate release Compose edge"
 done
+for repair_rejected_action in activate rollback status ledger-mode harden-edge install-token; do
+  if repair_argument_output="$(bash "${standalone_release_script}" \
+    "${repair_rejected_action}" --repair-bot 2>&1)"; then
+    fail "${repair_rejected_action} must reject --repair-bot"
+  fi
+  grep -Fq -- '--repair-bot is only valid for prepare' <<<"${repair_argument_output}" || \
+    fail "${repair_rejected_action} did not reject the repair flag before lifecycle work"
+done
+prepare_repair_flow="$(release_function_body prepare_release)"
+bash -c '
+  set -Eeuo pipefail
+  eval "$1"
+  eval "$2"
+  eval "$3"
+  probe_root="$(mktemp -d)"
+  trap '\''command rm -rf -- "${probe_root}"'\'' EXIT
+  release_id=20990102T000000Z
+  current_id=20990101T000000Z
+  https_config=unused
+  bot_id=aaaaaaaaaaaa
+  web_id=bbbbbbbbbbbb
+  fail() { printf "%s\n" "$1" >&2; exit 1; }
+  log() { :; }
+  read_release_link() { [[ "${failure}" == empty ]] || printf "%s" "${current_id}"; }
+  assert_staged_edge_contract() { [[ "${failure}" != perimeter ]] || fail perimeter; }
+  verify_release_compose_edge_contract() { [[ "${failure}" != compose ]] || fail compose; }
+  verify_release_images() { [[ "${failure}" != manifest ]] || fail manifest; }
+  inner_upstream_https_smoke() { [[ "${failure}" != inner-api ]]; }
+  outer_caddy_https_smoke() { [[ "${failure}" != outer-api ]]; }
+  image_manifest_path() { printf "%s/manifest" "${probe_root}"; }
+  verify_image() { :; }
+  record_image_manifest() { :; }
+  test_nginx_config() { :; }
+  compose_release() {
+    if [[ "$1 $2" == "${current_id} ps" ]]; then
+      [[ "$4" == bot ]] && printf "%s" "${bot_id}" || printf "%s" "${web_id}"
+    elif [[ "$*" == "${release_id} build web bot" ]]; then
+      : >"${probe_root}/built"
+    else fail "unexpected live Compose mutation: $*"; fi
+  }
+  docker() {
+    case "$1" in
+      ps)
+        [[ "${failure}" == missing-bot ]] && return 0
+        printf "%s\n" "${bot_id}"
+        if [[ "${failure}" == duplicate-bot ]]; then printf "%s\n" "${web_id}"; fi
+        ;;
+      image)
+        [[ "$*" != *"${release_id}" ]] || return 1
+        printf "sha256:current-image"
+        ;;
+      inspect)
+        case "$3" in
+          "{{.Image}}")
+            [[ "${failure}" == wrong-image && "$4" == "${bot_id}" ]] && \
+              printf "sha256:unknown" || printf "sha256:current-image"
+            ;;
+          "{{.RestartCount}}")
+            [[ "${failure}" == restarted-bot && "$4" == "${bot_id}" ]] && printf 1 || printf 0
+            ;;
+          *)
+            [[ ( "${failure}" == unhealthy-web && "$4" == "${web_id}" ) || \
+              ( "${failure}" == unhealthy-bot && "$4" == "${bot_id}" ) ]] && \
+              printf unhealthy || printf healthy
+            ;;
+        esac
+        ;;
+      *) fail "unexpected Docker mutation: $*" ;;
+    esac
+  }
+  repair_bot=false
+  failure=none
+  prepare_release
+  [[ -f "${probe_root}/built" ]] || exit 1
+  command rm "${probe_root}/built"
+  for failure in unhealthy-bot restarted-bot; do
+    repair_bot=false
+    if (prepare_release >/dev/null 2>&1); then exit 1; fi
+    [[ ! -e "${probe_root}/built" ]] || exit 1
+    repair_bot=true
+    prepare_release
+    [[ -f "${probe_root}/built" ]] || exit 1
+    command rm "${probe_root}/built"
+  done
+  for failure in empty perimeter compose manifest missing-bot duplicate-bot wrong-image unhealthy-web inner-api outer-api; do
+    if (prepare_release >/dev/null 2>&1); then
+      fail "repair prepare bypassed ${failure}"
+    fi
+    [[ ! -e "${probe_root}/built" ]] || fail "repair built before rejecting ${failure}"
+  done
+' _ "${prepare_repair_flow}" "${running_service_container_flow}" \
+  "$(release_function_body service_health)" || \
+  fail 'prepare bot repair preserves live web and perimeter harness failed'
 grep -Fq 'verify_release_compose_edge_contract "${previous_release}"' \
   <<<"${rollback_runtime_body}" || \
   fail 'runtime rollback must validate its target release Compose edge'
