@@ -1,22 +1,26 @@
 # Cometa — handoff
 
-Дата среза: 2026-09-06. Recovery завершён: current B `20260906T104102Z`, previous A
-`20260906T104101Z`, оба source `774f0ae`. A activated в `12:31:30Z`, B — в `12:33:21Z`.
-Checksums/source parity, strict preflights и оба `prepare --repair-bot` прошли; обычные 31-second
-health/TLS/API gates стабильны. Web и bot healthy, zero restarts, `bot_polling_ready`, повторных
-profile `429` нет. Full status и ledger status exit 0: `/private/tmp/cometa-104102-live-status.log`.
-Mode остаётся LOCAL, owner canonical imports 0; mutating bank chat flows ещё не включены.
+Дата среза: 2026-09-07; timestamps ниже — 2026-09-06 UTC. Current B `20260906T173602Z`, previous
+A `20260906T173601Z`, оба source `ef9a960`. Оба prepared/activated и healthy: A в `17:45:07Z`,
+B в `17:46:54Z`. CI `34049087351` прошёл 815 tests. Оба Old профиля реально переоткрыты через
+Escape → main window Open Cometa, compiled `173602`, по 438 rows с прежними exact tx hashes.
+Новая попытка server activation в `18:04Z` остановилась до switch/restart/import: WAL-fix прошёл,
+но shell удалил SQL single quotes в embedded Node eval (`WHERE type = table`, syntax error).
+Mode LOCAL, imports 0, web/bot healthy. Две runtime строки operator заменены bound parameters,
+harness проверяет real Bash-parsed JS на scratch SQLite: focused/full 815 verify PASS, compiling
+exact-SQL-quoting mutant killed.
+Activation заблокирована до verified fix и нового immutable deploy; bank chat flows не включены.
 Попытка `ledger-mode server --apply` в `14:37:32Z` остановилась до mode switch/restart: read-only
 single-file WAL backup не может создать SQLite sidecars (code 14). Root `0600` backup сохранён:
 `/srv/cometa-bank/backups/20260906T143732Z-before-ledger-mode-server.sqlite`, `quick_check=ok`, LOCAL.
-Новый uncommitted fix нормализует только disposable `.compat` в DELETE, не live DB/retained backup.
+Выпущенный `ef9a960` WAL-fix нормализует только disposable `.compat` в DELETE, не live DB/retained backup.
 815 tests и compiling mutant red/restored green; exact read-only Docker probes на обоих existing
 images прошли с normalized synthetic copy, original unchanged. Владелец явно разрешил текущий
 WAL-fix без Opus; это отдельный narrow waiver, не перенос прежнего `774f0ae` exception.
 Retry `/private/tmp/claude-paired-review-wal-backup-retry-20260906/attempt.md` не дал report и
 остановлен оператором после 10 минут: не clean и не повторно подтверждённая org access error.
-Текущий fix разрешён к normal immutable deploy без нового Opus attempt; завершение deploy/server
-activation пока не подтверждено, последний проверенный mode LOCAL.
+WAL-fix deployed в `173601`/`173602` без нового Opus attempt. Его gate пройден; последующий SQL
+quoting defect блокирует server activation, последний проверенный mode LOCAL.
 Final `pnpm verify` повторно прошёл 815 tests, lint/deploy guards/build в `13:01Z`.
 Ранее combined Opus review recovery не выполнился из-за отключённого организацией Claude Code
 access. Тогда владелец явно waived missing review только для emergency recovery
@@ -31,8 +35,8 @@ v19 о continuous progress отклонён: Chrome подтвердил неи�
 Первоначальный v20 не запустился из-за session quota; exact Opus 5 retry завершён в `10:18Z`:
 verdict `clean`, 0 findings, resolved source `2897de5`.
 В `10:05Z` повторно пройдены 9 signed checks; healthy checkpoint `10:08Z` предшествует bot incident.
-Visuals опубликованы в `51a2eb0`. Последний Linux CI для `774f0ae` green в `12:16:08Z`,
-run `34032518573`; это не review waiver и не доказательство live recovery.
+Visuals опубликованы в `51a2eb0`. Последний Linux CI `ef9a960` green, run `34049087351` (815 tests);
+это не proof server activation или review нового SQL quoting fix.
 CLAUDE invariants ранее записаны в `ae9c65e`.
 Новый milestone
 ещё не принят.
@@ -46,7 +50,7 @@ candidate и повторный native pass после его deploy. Production
 
 ## Текущий результат
 
-На `https://euphoria.bot` web и bot healthy после recovery B `104102`; polling/readiness проверены.
+На `https://euphoria.bot` web и bot healthy на B `173602`; server activation пока заблокирована.
 Пока `ledger_mode=local`,
 web и Telegram bank state остаются device-local; разрешённый bot profile содержит только
 non-mutating commands. Existing
@@ -54,10 +58,10 @@ owner snapshots сохранены: Nikita — все 438 rows без измен
 interest settlement. Это два проверяемых собственных Telegram Old профиля; их не следует
 отождествлять с John Cometa по одному display name.
 
-В `14:36:25Z` оба Telegram Old profiles получили compiled `104102`; read-only parity в `14:56:22Z`
-подтвердила все 438 rows и прежние transaction/balance hashes у каждого, LOCAL, canonical false,
-imports 0. Владелец явно waived remaining manual native button/foreground acceptance; это не tested
-pass. Desktop coordinate/AX ошибки остаются ограничением native automation.
+Оба оригинальных Old профиля Nikita и MetaFlexer реально прошли Escape → main window Open Cometa
+через AX Main Menu/account switching: compiled `173602`, по 438 rows, прежние exact tx hashes.
+Просьба manual reopen разрешена этим реальным pass. Ранее owner-waived remaining native
+button/foreground scope не превращается в tested pass; остальные phone gates открыты.
 По явной просьбе владельца открыт отдельный headed Chrome с fresh profile
 `/private/tmp/cometa-telegram-web-qa.Mtuner/profile`; владелец вошёл через QR. Реальный Telegram Web
 John Cometa прошёл English → KZT → Cometa is ready → Open Cometa → Telegram open-page consent →
@@ -653,17 +657,14 @@ Telegram Android/iOS acceptance.
 1. Recovery deploy завершён и не требует повторения. Узкий owner waiver покрывает только missing
    Opus review emergency source `774f0ae`; тот review не выполнен, clean не заявлен.
    Не переносить waiver на будущие changes и не открывать дополнительный improvement/review cycle.
-2. Focused John Web QA завершён; оба Old profiles имеют final-build marker `104102` и неизменные
-   438-row snapshots. Remaining manual native button/foreground acceptance waived владельцем,
-   не tested pass. Namespace John не отождествлять с Old по display name.
-   Native desktop automation ограничена `-10005`/`AXError.notImplemented`; browser-plugin binding
-   отсутствует, но owner-authorized isolated Playwright Web session уже работает.
-3. Владелец явно waived Opus для текущего WAL `.compat` fix. Выпустить именно этот tested fix
-   через normal immutable lifecycle, без нового Opus attempt, затем повторить one-way switch.
-   Это отдельный waiver; прежний `774f0ae` scope не расширяется. Retry остановлен оператором после
-   10 минут без report, не clean и не подтверждение новой org error. Предыдущий switch в `14:37:32Z`
-   завершился code 14 до mode/restart; durable backup сохранён, последний mode LOCAL/imports 0.
-   После verified deploy выполнить one-way switch,
+2. Focused John Web QA завершён на своём recorded build; оба Old реально переоткрыты на `173602`
+   через AX Main Menu/account switching с сохранением 438 rows/exact hashes. Остальной ранее
+   waived native scope не помечать tested. Namespace John не отождествлять с Old по display name.
+3. WAL `.compat` fix выпущен в healthy `ef9a960` pair, CI 815 green. Новый blocker — SQL quoting
+   в operator embedded Node eval: switch в `18:04Z` остановился до mode/restart/import. Исправление
+   operator/harness в работе; после focused verification нужен новый immutable deploy без новой
+   Opus попытки, затем guarded server retry. До его success mode LOCAL/imports 0.
+   После verified activation
    импортировать по одному canonical snapshot на профиль и пройти изолированные RU/EN journeys:
    manual income/expense, recurrence с backfill/no-overdraft, add/adjust/close/restore и
    current→previous→current continuity. Не reseed existing snapshots ради валюты сценария и не

@@ -1637,8 +1637,8 @@ verify_local_authority_backup_with_image() {
         ];
         const tables = new Set(
           database
-            .prepare("SELECT name FROM sqlite_schema WHERE type = 'table'")
-            .all()
+            .prepare("SELECT name FROM sqlite_schema WHERE type = ?")
+            .all("table")
             .map((row) => row.name),
         );
         if (requiredTables.some((table) => !tables.has(table))) process.exit(1);

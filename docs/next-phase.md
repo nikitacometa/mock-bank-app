@@ -1,24 +1,26 @@
 # Cometa — resume point and next phase
 
-Date: 2026-09-06. Recovery is complete: current B `20260906T104102Z`, previous A
-`20260906T104101Z`, both source `774f0ae`. A activated at `12:31:30Z`, B at `12:33:21Z`; both
-strict preflights and `prepare --repair-bot` passed with matching source/checksums. Ordinary
-31-second health/TLS/API gates passed: web/bot healthy, zero restarts, `bot_polling_ready`, no
-repeated profile `429`. Full and ledger status exited 0; evidence:
-`/private/tmp/cometa-104102-live-status.log`. Mode remains LOCAL with zero owner canonical imports;
-expanded bank chat flows are not active. Final `pnpm verify` passed again at `13:01Z`: 815 tests,
-lint/deploy guards/build.
+Date: 2026-09-07; timestamps below are September 6 UTC. Current B `20260906T173602Z`, previous
+A `20260906T173601Z`, both source `ef9a960`, fully prepared/activated and healthy (A `17:45:07Z`,
+B `17:46:54Z`). CI `34049087351` passed 815 tests. Both original Old profiles actually reloaded
+through Escape → main-window Open Cometa: compiled `173602`, 438 rows each, exact tx hashes retained.
+The `18:04Z` server attempt passed WAL compatibility but stopped before mode/restart/import:
+the shell stripped SQL single quotes from embedded Node eval (`WHERE type = table`, syntax error).
+Mode remains LOCAL, imports 0, web/bot healthy. The two-line bound-parameter operator fix and
+real Bash-parsed verifier/switch regression pass focused checks; full 815 verify passed and the
+compiling exact-SQL-quoting mutant was killed.
+Activation is blocked pending verified fix and fresh immutable packaging/deploy. Chat flows remain inactive.
 The `14:37:32Z` server-mode attempt failed before mode switch/restart: a read-only single-file WAL
 backup could not create SQLite sidecars (code 14). The retained root `0600` backup
 `/srv/cometa-bank/backups/20260906T143732Z-before-ledger-mode-server.sqlite` passes `quick_check`
-and remains LOCAL. An uncommitted release-script/regression fix normalizes only disposable `.compat`
+and remains LOCAL. The deployed `ef9a960` release-script/regression fix normalizes only disposable `.compat`
 to DELETE, never live DB or durable backup; 815 tests, compiling mutant and both existing-image
 read-only Docker probes pass. The owner explicitly waived Opus for this existing WAL fix and
 authorized scoped completion; this is separate from the earlier `774f0ae` waiver. The retry in
 `/private/tmp/claude-paired-review-wal-backup-retry-20260906/attempt.md` produced no report and was
 stopped by the operator after ten minutes, not clean or a reconfirmed organization-access error.
-Proceed with the normal immutable deploy, without another Opus attempt; deployment/server activation
-are not yet verified complete. The earlier recovery review produced no report because the organization disabled Claude Code
+The WAL fix is deployed in healthy A173601/B173602 without another Opus attempt; the later SQL
+quoting failure still blocks server activation. The earlier recovery review produced no report because the organization disabled Claude Code
 access. The owner explicitly waived missing review only for emergency recovery source `774f0ae`.
 That narrow exception closes its deploy gate, not a clean review or a future-change waiver.
 The earlier failed B `095602` activation and unhealthy rollback A `095601` are incident history.
@@ -174,17 +176,16 @@ in `docs/handoff.md`; architecture remains canonical in `docs/spec.md`.
 3. Recheck Irena, current/previous images, containers/restarts, `ledger_mode=local`, Caddy semantics,
    exact loopback bindings, quiesced renewal units, DNS and TLS/API smoke. The Docker/Caddy bridge
    is already installed; do not rerun its host-wide migration as the next normal release step.
-4. Keep the recovered A104101/B104102 rollback pair until the now-authorized operator fix is
-   packaged and deployed through the normal immutable
-   release lifecycle; never hot-patch the current release or repeat the host migration. The recovery
-   pair's ordinary health/TLS/API gates and root-only WAL-safe backups are already verified.
+4. Keep healthy A173601/B173602 on `ef9a960` while the new SQL-quoting operator/harness fix is
+   completed and verified. Package/deploy that fix through the normal immutable release lifecycle;
+   never hot-patch the current release or repeat the host migration. No new Opus attempt is needed.
    Older `075300`/`075301`, `092401`/`092402`, `094101`/`094102` and incident `095601`/`095602`
    are not the active rollback pair. Preserve the DB/token and LOCAL mode during remaining QA.
-5. Preserve both Old final-build `104102`/438-row parity proofs and completed distinct John Web QA.
+5. Preserve both Old actual-reopen `173602`/438-row exact-hash proofs and completed distinct John Web QA.
    The owner explicitly waived remaining manual native button/foreground acceptance; do not label
    that scope tested. Do not conflate namespaces or reset snapshots to manufacture acceptance.
-6. After the authorized `.compat` fix is deployed and verified, retry the one-way switch
-   that previously failed code 14 before mode/restart, then import each
+6. After the new SQL-quoting fix is deployed and verified, retry the one-way switch. The latest
+   attempt stopped safely before mode/restart/import; do not call it activated. Only after success import each
    preserved device snapshot once. Prove one-off, recurrence/backfill, overdraft rejection,
    add/adjust/close/restore, current→previous→current survival and cross-profile isolation. Use RU/EN
    journeys without reseeding existing accounts to manufacture a different base currency.

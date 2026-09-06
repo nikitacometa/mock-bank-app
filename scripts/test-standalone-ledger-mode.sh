@@ -44,6 +44,10 @@ eval "$(extract_function verify_live_database_integrity | \
   sed '1s/^verify_live_database_integrity()/verify_live_database_integrity_impl()/')"
 eval "$(extract_function assert_authority_bridge)"
 eval "$(extract_function prepare_ledger_mode_backup)"
+eval "$(extract_function verify_local_authority_backup_with_image | \
+  sed '1s/^verify_local_authority_backup_with_image()/verify_local_authority_backup_with_image_impl()/')"
+eval "$(extract_function switch_live_ledger_mode_to_server | \
+  sed '1s/^switch_live_ledger_mode_to_server()/switch_live_ledger_mode_to_server_impl()/')"
 eval "$(extract_function reconcile_failed_ledger_mode_switch)"
 eval "$(extract_function guard_server_authority_release_transition)"
 eval "$(extract_function restart_bot_for_server_commands)"
@@ -97,6 +101,10 @@ verify_local_authority_backup_with_image() {
     record_event "verify-backup-failed:$1"
     return 1
   fi
+  verify_local_authority_backup_with_image_impl "$@" || {
+    printf 'ERROR: shell-parsed authority backup JavaScript failed\n' >&2
+    return 1
+  }
   record_event "verify-backup:$1"
 }
 
@@ -144,6 +152,23 @@ date() {
 }
 
 docker() {
+  if [[ "$1" == run || "$1" == exec ]]; then
+    # Execute the actual --eval argument after Bash has parsed its quotes.
+    # Only redirect container database paths to this harness SQLite fixture.
+    local javascript="${!#}" database_path="${live_database_path}" argument
+    [[ "${javascript}" == *'import { DatabaseSync } from "node:sqlite";'* ]] || return 1
+    for argument in "$@"; do
+      if [[ "${argument}" == type=bind,src=*,dst=/data/check.sqlite,readonly ]]; then
+        database_path=${argument#type=bind,src=}
+        database_path=${database_path%,dst=/data/check.sqlite,readonly}
+      fi
+    done
+    [[ "${database_path}" =~ ^/[A-Za-z0-9._/-]+$ ]] || return 1
+    javascript=${javascript//\/data\/check.sqlite/${database_path}}
+    javascript=${javascript//\/data\/cometa-bank.sqlite/${live_database_path}}
+    node --input-type=module --eval "${javascript}"
+    return $?
+  fi
   [[ "$1" == 'image' && "$2" == 'inspect' && "$3" == '--format' && \
     "$4" == '{{.Id}}' ]] || return 1
   case "$5" in
@@ -151,6 +176,11 @@ docker() {
     "cometa-bank-bot:${expected_current_release}") printf 'sha256:%064d\n' 2 ;;
     *) return 1 ;;
   esac
+}
+
+compose_release() {
+  [[ "$*" == "${expected_current_release} ps -q bot" ]] || return 1
+  printf '%064d\n' 1
 }
 
 read_release_link() {
@@ -240,6 +270,19 @@ log() {
 reset_database
 [[ "$(read_database_ledger_mode)" == 'local' ]]
 verify_live_database_integrity
+
+# Exercise the real shell-parsed switch SQL against scratch data before the
+# later orchestration failure-injection stubs. A repeated switch must reject.
+switch_live_ledger_mode_to_server_impl "${expected_current_release}" || \
+  fail 'shell-parsed ledger-mode switch JavaScript failed'
+[[ "$(read_database_ledger_mode)" == 'server' ]] || exit 1
+if (switch_live_ledger_mode_to_server_impl "${expected_current_release}") \
+  >"${output_file}" 2>&1; then
+  fail 'shell-parsed ledger-mode switch accepted an already-server database'
+fi
+grep -Fq 'ledger mode is not local' "${output_file}" || exit 1
+[[ "$(read_database_ledger_mode)" == 'server' ]] || exit 1
+reset_database
 
 # The bridge must consist of two distinct authority-capable immutable releases,
 # and the operator script itself must come from current.

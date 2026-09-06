@@ -21,6 +21,32 @@ certificate and renewal.
 
 ## Verified checkpoint — 2026-09-06
 
+Current is B `20260906T173602Z`, previous is A `20260906T173601Z`, both from
+`ef9a960`. A activated at `17:45:07Z`, B at `17:46:54Z`. Both passed immutable
+image/perimeter checks, the 31-second stable-health window and inner/outer TLS/API
+smoke. Both packages passed 815 tests and extracted-source/checksum parity;
+Linux CI run `34049087351` passed. The original two Telegram Old profiles were
+normally reopened on this build, preserving each exact 438-row history and all
+balances. The separate Telegram Web profile also preserved its 437-row baseline.
+
+Ledger mode remains `local`. The authorized switch at `18:04Z` stopped before
+any mode change or bot restart: the WAL normalization now passes, but a shell-quoted
+Node script stripped the SQL literal in the required-table check. The parameterized
+query fix passes 815 tests. Its regression executes the actual shell-parsed verifier
+and switch scripts against scratch SQLite; restoring the old quoting reproduces
+the exact syntax error. Deployment is pending. Do not bypass this gate, patch an immutable release, reset client
+storage or import a substitute fixture. Package the fix normally, then retry
+`ledger-mode server --apply` through `current`.
+
+The owner waived further Opus review for this scoped completion. This is a waiver,
+not a clean independent review. Server activation, canonical imports, live bot
+mutation/isolation and state-preserving rollback remain unverified.
+
+Live SSH configuration resolves `irena` to user `irena` (UID/GID `1001`). Use
+`ssh -G irena` as the source of truth. The earlier evidence below is historical.
+
+### Earlier recovery and activation evidence
+
 **Recovery completed:** current is B `20260906T104102Z`, previous is A
 `20260906T104101Z`, both from source `774f0ae`. A activated at `12:31:30Z`, B at
 `12:33:21Z`. Each passed the ordinary 31-second stable-health window, immutable
